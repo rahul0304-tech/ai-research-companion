@@ -18,8 +18,43 @@ interface Message {
 }
 
 serve(async (req) => {
+  // Log all incoming requests
+  console.log('Webhook called:', {
+    method: req.method,
+    url: req.url,
+    headers: Object.fromEntries(req.headers.entries())
+  });
+
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
+  }
+
+  // Handle GET requests (Twilio webhook validation)
+  if (req.method === 'GET') {
+    console.log('GET request received - webhook validation');
+    return new Response(
+      JSON.stringify({
+        status: 'ok',
+        service: 'whatsapp-webhook',
+        timestamp: new Date().toISOString()
+      }),
+      {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      }
+    );
+  }
+
+  // Only process POST requests for messages
+  if (req.method !== 'POST') {
+    console.log('Unsupported method:', req.method);
+    return new Response(
+      JSON.stringify({ error: 'Method not allowed. Use POST for messages or GET for validation.' }),
+      {
+        status: 405,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      }
+    );
   }
 
   try {
@@ -59,7 +94,24 @@ serve(async (req) => {
       message_id = formData.get('MessageSid') as string || '';
     }
 
-    console.log('Received message:', { phone_number, message_content, message_id });
+    console.log('Parsed message data:', { phone_number, message_content, message_id });
+
+    // Validate required data
+    if (!phone_number || !message_content) {
+      console.error('Missing required data:', { phone_number: !!phone_number, message_content: !!message_content });
+      return new Response(
+        JSON.stringify({ 
+          error: 'Missing required fields',
+          details: 'phone_number and message_content are required'
+        }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      );
+    }
+
+    console.log('Valid message received:', { phone_number, message_content, message_id });
 
     // Store incoming message
     const userMessage: Message = {
@@ -177,13 +229,18 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('Webhook error:', error);
-    return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }), 
-      { 
-        status: 500, 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-      }
-    );
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    
+    // Return TwiML error response for compatibility
+    const twimlError = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Message>Error processing message: ${escapeXml(errorMessage)}</Message>
+</Response>`;
+    
+    return new Response(twimlError, {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'text/xml' }
+    });
   }
 });
 
