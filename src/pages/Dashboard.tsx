@@ -11,11 +11,11 @@ const Dashboard = () => {
 
   return (
     <div className="min-h-screen bg-gradient-subtle">
-      <div className="border-b border-border/50 bg-card/80 backdrop-blur-sm sticky top-0 z-10">
+      <div className="border-b border-border/50 bg-card backdrop-blur-sm sticky top-0 z-10 shadow-sm">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-primary flex items-center justify-center shadow-glow">
-              <Sparkles className="w-5 h-5 text-white" />
+            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center shadow-md">
+              <Sparkles className="w-5 h-5 text-primary-foreground" />
             </div>
             <div>
               <h1 className="text-2xl font-bold text-foreground">InfoNiblet</h1>
