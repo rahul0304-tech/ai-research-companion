@@ -5,6 +5,7 @@ import { UpdatesView } from "@/components/dashboard/UpdatesView";
 import { SubscriptionsView } from "@/components/dashboard/SubscriptionsView";
 import { SettingsView } from "@/components/dashboard/SettingsView";
 import { MessageSquare, Sparkles, Users, Settings } from "lucide-react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 const Dashboard = () => {
   const [activeTab, setActiveTab] = useState("messages");
@@ -13,14 +14,17 @@ const Dashboard = () => {
     <div className="min-h-screen bg-gradient-subtle">
       <div className="border-b border-border/50 bg-card backdrop-blur-sm sticky top-0 z-10 shadow-sm">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center shadow-md">
-              <Sparkles className="w-5 h-5 text-primary-foreground" />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center shadow-md">
+                <Sparkles className="w-5 h-5 text-primary-foreground" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-foreground">InfoNiblet</h1>
+                <p className="text-sm text-muted-foreground">AI Research Assistant Dashboard</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">InfoNiblet</h1>
-              <p className="text-sm text-muted-foreground">AI Research Assistant Dashboard</p>
-            </div>
+            <ThemeToggle />
           </div>
         </div>
       </div>
