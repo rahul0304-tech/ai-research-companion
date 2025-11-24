@@ -2,10 +2,16 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Sparkles, MessageSquare, Zap, Clock, ArrowRight, Bot } from "lucide-react";
 import { Link } from "react-router-dom";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 const Index = () => {
   return (
     <div className="min-h-screen bg-gradient-subtle">
+      {/* Header with theme toggle */}
+      <header className="absolute top-0 right-0 z-20 p-4">
+        <ThemeToggle />
+      </header>
+      
       {/* Hero Section */}
       <section className="relative overflow-hidden border-b border-border/50">
         <div className="absolute inset-0 bg-gradient-primary opacity-5"></div>
