@@ -167,13 +167,43 @@ serve(async (req) => {
     } else if (intent === 'unsubscribe') {
       const result = await handleSubscription(supabase, phone_number, 'unsubscribe');
       aiResponse = result.message;
+    } else if (intent === 'request_update') {
+      // Get latest AI updates from database
+      const { data: updates } = await supabase
+        .from('ai_updates')
+        .select('title, summary, scheduled_for')
+        .eq('status', 'sent')
+        .order('scheduled_for', { ascending: false })
+        .limit(3);
+      
+      if (updates && updates.length > 0) {
+        aiResponse = '📰 *Latest AI Updates*\n\n';
+        updates.forEach((update: any, idx: number) => {
+          aiResponse += `${idx + 1}. *${update.title}*\n${update.summary}\n\n`;
+        });
+      } else {
+        aiResponse = '📰 No recent updates available. Check back soon!';
+      }
     } else if (intent === 'qa') {
-      // Use AI for Q&A
+      // Enhanced AI for Q&A with current info awareness
+      const enhancedSystemPrompt = `${systemPrompt}
+
+IMPORTANT: You have access to information up to April 2024. When answering:
+1. For questions about current events after April 2024, acknowledge the limitation but provide context
+2. For general knowledge, technical questions, and historical information - answer confidently
+3. Always cite sources with [1], [2] notation when possible
+4. Keep answers concise and accurate
+5. If asked about very recent events, explain your knowledge cutoff
+
+Be helpful and informative while being transparent about limitations.`;
+
       const messages = [
-        { role: 'system', content: systemPrompt },
+        { role: 'system', content: enhancedSystemPrompt },
         ...conversationHistory,
         { role: 'user', content: message_content }
       ];
+
+      console.log('Calling AI API for Q&A');
 
       const aiApiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
         method: 'POST',
@@ -192,15 +222,16 @@ serve(async (req) => {
         console.error('AI API error:', aiApiResponse.status, errorText);
         
         if (aiApiResponse.status === 429) {
-          aiResponse = 'Rate limit exceeded. Please try again in a moment.';
+          aiResponse = '⏱️ Rate limit exceeded. Please try again in a moment.';
         } else if (aiApiResponse.status === 402) {
-          aiResponse = 'Service temporarily unavailable. Please contact support.';
+          aiResponse = '❌ Service temporarily unavailable. Please contact support.';
         } else {
-          aiResponse = 'Sorry, I encountered an error. Please try again.';
+          aiResponse = '❌ Sorry, I encountered an error. Please try again.';
         }
       } else {
         const aiData = await aiApiResponse.json();
         aiResponse = aiData.choices?.[0]?.message?.content || 'Sorry, I could not generate a response.';
+        console.log('AI response generated successfully');
       }
     } else {
       aiResponse = "I'm not sure how to help with that. Try:\n1️⃣ Latest updates\n2️⃣ Ask a question\n3️⃣ Subscribe";
