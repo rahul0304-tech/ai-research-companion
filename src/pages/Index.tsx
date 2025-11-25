@@ -3,10 +3,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Sparkles, MessageSquare, Zap, Clock, ArrowRight, Bot } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ThemeToggle } from "@/components/ThemeToggle";
-
 const Index = () => {
-  return (
-    <div className="min-h-screen bg-gradient-subtle">
+  return <div className="min-h-screen bg-gradient-subtle">
       {/* Header with theme toggle */}
       <header className="absolute top-0 right-0 z-20 p-4">
         <ThemeToggle />
@@ -23,7 +21,7 @@ const Index = () => {
             </div>
             
             <h1 className="text-5xl md:text-7xl font-bold text-foreground animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100">
-              Meet <span className="gradient-primary bg-clip-text text-transparent">InfoNiblet</span>
+              Meet <span className="gradient-primary bg-clip-text text-transparent bg-black/[0.04]">InfoNiblet</span>
             </h1>
             
             <p className="text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto animate-in fade-in slide-in-from-bottom-5 duration-700 delay-200">
@@ -163,8 +161,6 @@ const Index = () => {
           </p>
         </div>
       </footer>
-    </div>
-  );
+    </div>;
 };
-
 export default Index;
