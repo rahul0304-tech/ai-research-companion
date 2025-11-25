@@ -21,6 +21,7 @@ export const SettingsView = () => {
   const [systemPrompt, setSystemPrompt] = useState('');
   const [updateFrequency, setUpdateFrequency] = useState(6);
   const [maxImagesPerDay, setMaxImagesPerDay] = useState(10);
+  const [openRouterModel, setOpenRouterModel] = useState('openai/gpt-4o');
 
   useEffect(() => {
     loadSettings();
@@ -55,6 +56,12 @@ export const SettingsView = () => {
         const value = imagesSetting.setting_value as any;
         setMaxImagesPerDay(value.limit || 10);
       }
+      
+      const modelSetting = data?.find(s => s.setting_key === 'openrouter_model');
+      if (modelSetting && typeof modelSetting.setting_value === 'object' && modelSetting.setting_value !== null) {
+        const value = modelSetting.setting_value as any;
+        setOpenRouterModel(value.model || 'openai/gpt-4o');
+      }
     }
     setLoading(false);
   };
@@ -78,6 +85,15 @@ export const SettingsView = () => {
         .from('assistant_settings')
         .update({ setting_value: { limit: maxImagesPerDay } })
         .eq('setting_key', 'max_images_per_day');
+
+      // Update OpenRouter model
+      await supabase
+        .from('assistant_settings')
+        .upsert({ 
+          setting_key: 'openrouter_model', 
+          setting_value: { model: openRouterModel },
+          description: 'OpenRouter AI model selection'
+        }, { onConflict: 'setting_key' });
 
       toast.success('Settings saved successfully');
     } catch (error) {
@@ -148,6 +164,20 @@ export const SettingsView = () => {
             />
             <p className="text-xs text-muted-foreground">
               Maximum number of AI-generated images per user per day
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="openrouter-model">OpenRouter AI Model</Label>
+            <Input
+              id="openrouter-model"
+              type="text"
+              value={openRouterModel}
+              onChange={(e) => setOpenRouterModel(e.target.value)}
+              placeholder="e.g., openai/gpt-4o, anthropic/claude-3.5-sonnet"
+            />
+            <p className="text-xs text-muted-foreground">
+              Choose from OpenRouter's available models. Popular: openai/gpt-4o, anthropic/claude-3.5-sonnet, google/gemini-pro
             </p>
           </div>
 
