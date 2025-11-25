@@ -60,7 +60,7 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY')!;
+    const openRouterApiKey = Deno.env.get('OPENROUTER_API_KEY')!;
     
     const supabase = createClient(supabaseUrl, supabaseKey);
 
@@ -151,6 +151,9 @@ serve(async (req) => {
     const systemPromptSetting = settings?.find(s => s.setting_key === 'system_prompt');
     const systemPrompt = systemPromptSetting?.setting_value?.prompt || 
       'You are InfoNiblet, a friendly AI research assistant. Keep answers concise and include sources.';
+    
+    const modelSetting = settings?.find(s => s.setting_key === 'openrouter_model');
+    const aiModel = modelSetting?.setting_value?.model || 'openai/gpt-4o';
 
     // Classify intent
     const intent = await classifyIntent(message_content);
@@ -203,16 +206,18 @@ Be helpful and informative while being transparent about limitations.`;
         { role: 'user', content: message_content }
       ];
 
-      console.log('Calling AI API for Q&A');
+      console.log('Calling OpenRouter API for Q&A with model:', aiModel);
 
-      const aiApiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      const aiApiResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${lovableApiKey}`,
+          'Authorization': `Bearer ${openRouterApiKey}`,
           'Content-Type': 'application/json',
+          'HTTP-Referer': supabaseUrl,
+          'X-Title': 'InfoNiblet WhatsApp Bot',
         },
         body: JSON.stringify({
-          model: 'google/gemini-2.5-flash',
+          model: aiModel,
           messages,
         }),
       });
