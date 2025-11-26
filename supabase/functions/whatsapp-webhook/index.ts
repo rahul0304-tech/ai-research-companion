@@ -15,7 +15,22 @@ interface Message {
   intent?: string;
   tool_calls?: any;
   ai_response?: string;
+  model_used?: string;
 }
+
+// Model Registry with specialized capabilities
+const MODEL_REGISTRY = {
+  general_chat: 'meta-llama/llama-3.2-3b-instruct:free',
+  heavy_reasoning: 'qwen/qwen3-235b-a22b:free',
+  web_search: 'deepseek/deepseek-chat-v3-0324:free',
+  image_generation: 'google/gemini-2.5-flash-image-preview',
+  multimodal: 'deepseek-ai/Janus-Pro-7B',
+  fast_reasoning: 'deepseek/deepseek-r1:free',
+  planning: 'deepseek/deepseek-r1:free',
+  orchestrator: 'meta-llama/llama-3.2-3b-instruct:free' // Lightweight for intent classification
+};
+
+type TaskIntent = 'general_question' | 'web_search' | 'reasoning' | 'planning' | 'image_generation' | 'image_understanding' | 'subscribe' | 'unsubscribe' | 'request_update';
 
 serve(async (req) => {
   // Log all incoming requests
@@ -155,23 +170,25 @@ serve(async (req) => {
     const modelSetting = settings?.find(s => s.setting_key === 'openrouter_model');
     const aiModel = modelSetting?.setting_value?.model || 'nvidia/nemotron-nano-12b-v2-vl:free';
 
-    // Classify intent
-    const intent = await classifyIntent(message_content);
+    // Use orchestrator to classify task and select model
+    const taskIntent = await classifyTaskIntent(openRouterApiKey, message_content, conversationHistory);
     
-    console.log('Classified intent:', intent);
+    console.log('Classified task intent:', taskIntent);
 
     // Handle different intents
     let aiResponse = '';
     let toolCalls: any = null;
+    let selectedModel = '';
 
-    if (intent === 'subscribe') {
+    if (taskIntent === 'subscribe') {
       const result = await handleSubscription(supabase, phone_number, 'subscribe');
       aiResponse = result.message;
-    } else if (intent === 'unsubscribe') {
+      selectedModel = 'system';
+    } else if (taskIntent === 'unsubscribe') {
       const result = await handleSubscription(supabase, phone_number, 'unsubscribe');
       aiResponse = result.message;
-    } else if (intent === 'request_update') {
-      // Get latest AI updates from database
+      selectedModel = 'system';
+    } else if (taskIntent === 'request_update') {
       const { data: updates } = await supabase
         .from('ai_updates')
         .select('title, summary, scheduled_for')
@@ -187,70 +204,33 @@ serve(async (req) => {
       } else {
         aiResponse = '📰 No recent updates available. Check back soon!';
       }
-    } else if (intent === 'qa') {
-      // Enhanced AI for Q&A with current info awareness
-      const enhancedSystemPrompt = `${systemPrompt}
-
-IMPORTANT: You have access to information up to April 2024. When answering:
-1. For questions about current events after April 2024, acknowledge the limitation but provide context
-2. For general knowledge, technical questions, and historical information - answer confidently
-3. Always cite sources with [1], [2] notation when possible
-4. Keep answers concise and accurate
-5. If asked about very recent events, explain your knowledge cutoff
-
-Be helpful and informative while being transparent about limitations.`;
-
-      const messages = [
-        { role: 'system', content: enhancedSystemPrompt },
-        ...conversationHistory,
-        { role: 'user', content: message_content }
-      ];
-
-      console.log('Calling OpenRouter API for Q&A with model:', aiModel);
-
-      const aiApiResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${openRouterApiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': supabaseUrl,
-          'X-Title': 'InfoNiblet WhatsApp Bot',
-        },
-        body: JSON.stringify({
-          model: aiModel,
-          messages,
-        }),
-      });
-
-      if (!aiApiResponse.ok) {
-        const errorText = await aiApiResponse.text();
-        console.error('AI API error:', aiApiResponse.status, errorText);
-        
-        if (aiApiResponse.status === 429) {
-          aiResponse = '⏱️ Rate limit exceeded. Please try again in a moment.';
-        } else if (aiApiResponse.status === 402) {
-          aiResponse = '💳 OpenRouter API needs more credits. Please add credits at https://openrouter.ai/settings/credits or contact your admin.';
-        } else {
-          aiResponse = '❌ Sorry, I encountered an error. Please try again.';
-        }
-      } else {
-        const aiData = await aiApiResponse.json();
-        aiResponse = aiData.choices?.[0]?.message?.content || 'Sorry, I could not generate a response.';
-        console.log('AI response generated successfully');
-      }
+      selectedModel = 'system';
     } else {
-      aiResponse = "I'm not sure how to help with that. Try:\n1️⃣ Latest updates\n2️⃣ Ask a question\n3️⃣ Subscribe";
+      // Execute task with specialized model
+      const executionResult = await executeWithSpecializedModel(
+        openRouterApiKey,
+        supabaseUrl,
+        taskIntent,
+        message_content,
+        conversationHistory,
+        systemPrompt
+      );
+      
+      aiResponse = executionResult.response;
+      selectedModel = executionResult.model;
+      toolCalls = executionResult.toolCalls;
     }
 
-    // Store AI response
+    // Store AI response with model tracking
     await supabase.from('whatsapp_messages').insert({
       phone_number,
       sender: 'assistant',
       message_type: 'text',
       message_content: aiResponse,
       ai_response: aiResponse,
-      intent,
+      intent: taskIntent,
       tool_calls: toolCalls,
+      model_used: selectedModel,
     });
 
     // Return response in TwiML format for Twilio or simple JSON
@@ -281,9 +261,16 @@ Be helpful and informative while being transparent about limitations.`;
 });
 
 // Helper functions
-function classifyIntent(message: string): string {
+
+// Orchestrator: Classify task intent using lightweight model
+async function classifyTaskIntent(
+  apiKey: string,
+  message: string,
+  history: any[]
+): Promise<TaskIntent> {
   const lower = message.toLowerCase();
   
+  // Quick rule-based classification for system commands
   if (lower.includes('subscribe') || lower.includes('sign up') || lower === '3') {
     return 'subscribe';
   }
@@ -293,11 +280,156 @@ function classifyIntent(message: string): string {
   if (lower.includes('latest') || lower.includes('update') || lower.includes('news') || lower === '1') {
     return 'request_update';
   }
-  if (lower.includes('?') || lower.includes('what') || lower.includes('how') || lower.includes('why') || lower === '2') {
-    return 'qa';
+  
+  // Use orchestrator model for complex intent classification
+  const classificationPrompt = `Analyze this user message and classify the task intent. Consider the conversation history for context.
+
+User message: "${message}"
+
+Task intents:
+- general_question: Simple questions, greetings, casual conversation
+- web_search: Questions requiring current information, real-time data, location-based queries, hotel/restaurant searches
+- reasoning: Complex problem-solving, analysis, mathematical problems, logic puzzles
+- planning: Creating itineraries, schedules, structured plans, step-by-step guides
+- image_generation: Requests to create, generate, or draw images
+- image_understanding: Analyzing, describing, or interpreting images (if image is included)
+
+Reply with ONLY the intent name, nothing else.`;
+
+  try {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: MODEL_REGISTRY.orchestrator,
+        messages: [
+          { role: 'system', content: 'You are a task classifier. Respond only with the intent name.' },
+          { role: 'user', content: classificationPrompt }
+        ],
+        temperature: 0.1,
+        max_tokens: 20,
+      }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const intent = data.choices?.[0]?.message?.content?.trim().toLowerCase();
+      
+      // Validate intent
+      const validIntents: TaskIntent[] = ['general_question', 'web_search', 'reasoning', 'planning', 'image_generation', 'image_understanding'];
+      if (validIntents.includes(intent as TaskIntent)) {
+        return intent as TaskIntent;
+      }
+    }
+  } catch (error) {
+    console.error('Intent classification error:', error);
   }
   
-  return 'qa'; // Default to QA
+  // Default fallback
+  return 'general_question';
+}
+
+// Execute task with specialized model
+async function executeWithSpecializedModel(
+  apiKey: string,
+  supabaseUrl: string,
+  intent: TaskIntent,
+  message: string,
+  history: any[],
+  systemPrompt: string
+): Promise<{ response: string; model: string; toolCalls?: any }> {
+  
+  // Select model based on intent
+  let selectedModel = MODEL_REGISTRY.general_chat;
+  let specializedSystemPrompt = systemPrompt;
+  
+  switch (intent) {
+    case 'web_search':
+      selectedModel = MODEL_REGISTRY.web_search;
+      specializedSystemPrompt = `${systemPrompt}\n\nYou have web search capabilities. Provide current, factual information with sources when possible.`;
+      break;
+    
+    case 'reasoning':
+    case 'planning':
+      selectedModel = MODEL_REGISTRY.heavy_reasoning;
+      specializedSystemPrompt = `${systemPrompt}\n\nYou are excellent at reasoning and problem-solving. Think step-by-step and provide detailed, logical explanations.`;
+      break;
+    
+    case 'image_generation':
+      selectedModel = MODEL_REGISTRY.image_generation;
+      specializedSystemPrompt = 'You are an image generation assistant. Create detailed, vivid images based on user descriptions.';
+      break;
+    
+    case 'image_understanding':
+      selectedModel = MODEL_REGISTRY.multimodal;
+      specializedSystemPrompt = `${systemPrompt}\n\nYou can understand and analyze images. Provide detailed, accurate descriptions.`;
+      break;
+    
+    case 'general_question':
+    default:
+      selectedModel = MODEL_REGISTRY.general_chat;
+      break;
+  }
+  
+  console.log(`Executing with ${intent} using model: ${selectedModel}`);
+  
+  // Build optimized context (last 10 messages to stay within token limits)
+  const recentHistory = history.slice(-10);
+  
+  const messages = [
+    { role: 'system', content: specializedSystemPrompt },
+    ...recentHistory,
+    { role: 'user', content: message }
+  ];
+  
+  try {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': supabaseUrl,
+        'X-Title': 'InfoNiblet Multi-Modal Bot',
+      },
+      body: JSON.stringify({
+        model: selectedModel,
+        messages,
+        temperature: intent === 'reasoning' || intent === 'planning' ? 0.3 : 0.7,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Model execution error:', response.status, errorText);
+      
+      if (response.status === 429) {
+        return { response: '⏱️ Rate limit exceeded. Please try again in a moment.', model: selectedModel };
+      } else if (response.status === 402) {
+        return { response: '💳 API credits exhausted. Please contact admin.', model: selectedModel };
+      } else {
+        return { response: '❌ Sorry, I encountered an error. Please try again.', model: selectedModel };
+      }
+    }
+
+    const data = await response.json();
+    const aiResponse = data.choices?.[0]?.message?.content || 'Sorry, I could not generate a response.';
+    
+    return {
+      response: aiResponse,
+      model: selectedModel,
+      toolCalls: null
+    };
+    
+  } catch (error) {
+    console.error('Execution error:', error);
+    return {
+      response: '❌ An error occurred while processing your request.',
+      model: selectedModel
+    };
+  }
 }
 
 async function handleSubscription(supabase: any, phone: string, action: 'subscribe' | 'unsubscribe') {
