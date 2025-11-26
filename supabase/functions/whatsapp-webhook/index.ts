@@ -153,7 +153,7 @@ serve(async (req) => {
       'You are InfoNiblet, a friendly AI research assistant. Keep answers concise and include sources.';
     
     const modelSetting = settings?.find(s => s.setting_key === 'openrouter_model');
-    const aiModel = modelSetting?.setting_value?.model || 'openai/gpt-4o';
+    const aiModel = modelSetting?.setting_value?.model || 'nvidia/nemotron-nano-12b-v2-vl:free';
 
     // Classify intent
     const intent = await classifyIntent(message_content);
