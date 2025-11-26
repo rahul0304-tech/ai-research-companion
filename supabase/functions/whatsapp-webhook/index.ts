@@ -229,7 +229,7 @@ Be helpful and informative while being transparent about limitations.`;
         if (aiApiResponse.status === 429) {
           aiResponse = '⏱️ Rate limit exceeded. Please try again in a moment.';
         } else if (aiApiResponse.status === 402) {
-          aiResponse = '❌ Service temporarily unavailable. Please contact support.';
+          aiResponse = '💳 OpenRouter API needs more credits. Please add credits at https://openrouter.ai/settings/credits or contact your admin.';
         } else {
           aiResponse = '❌ Sorry, I encountered an error. Please try again.';
         }
