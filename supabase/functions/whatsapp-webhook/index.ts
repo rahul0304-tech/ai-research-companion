@@ -18,19 +18,16 @@ interface Message {
   model_used?: string;
 }
 
-// Model Registry with specialized capabilities
+// Model Registry with specialized capabilities (using most reliable free models)
 const MODEL_REGISTRY = {
-  general_chat: 'meta-llama/llama-3.2-3b-instruct:free',
-  heavy_reasoning: 'qwen/qwen3-235b-a22b:free',
-  web_search: 'deepseek/deepseek-chat-v3-0324:free',
-  image_generation: 'google/gemini-2.5-flash-image-preview',
-  multimodal: 'deepseek-ai/Janus-Pro-7B',
-  fast_reasoning: 'deepseek/deepseek-r1:free',
-  planning: 'deepseek/deepseek-r1:free',
-  orchestrator: 'meta-llama/llama-3.2-3b-instruct:free' // Lightweight for intent classification
+  general_chat: 'deepseek/deepseek-chat-v3-0324:free', // Reliable, good uptime
+  heavy_reasoning: 'deepseek/deepseek-r1:free', // Excellent reasoning
+  web_search: 'deepseek/deepseek-chat-v3-0324:free', // Good for current info
+  planning: 'deepseek/deepseek-r1:free', // Best for structured thinking
+  fallback: 'nvidia/nemotron-nano-12b-v2-vl:free' // Ultra-reliable fallback
 };
 
-type TaskIntent = 'general_question' | 'web_search' | 'reasoning' | 'planning' | 'image_generation' | 'image_understanding' | 'subscribe' | 'unsubscribe' | 'request_update';
+type TaskIntent = 'general_question' | 'web_search' | 'reasoning' | 'planning' | 'subscribe' | 'unsubscribe' | 'request_update';
 
 serve(async (req) => {
   // Log all incoming requests
@@ -170,8 +167,8 @@ serve(async (req) => {
     const modelSetting = settings?.find(s => s.setting_key === 'openrouter_model');
     const aiModel = modelSetting?.setting_value?.model || 'nvidia/nemotron-nano-12b-v2-vl:free';
 
-    // Use orchestrator to classify task and select model
-    const taskIntent = await classifyTaskIntent(openRouterApiKey, message_content, conversationHistory);
+    // Use rule-based classification (no API call needed)
+    const taskIntent = classifyTaskIntent(message_content, conversationHistory);
     
     console.log('Classified task intent:', taskIntent);
 
@@ -262,15 +259,11 @@ serve(async (req) => {
 
 // Helper functions
 
-// Orchestrator: Classify task intent using lightweight model
-async function classifyTaskIntent(
-  apiKey: string,
-  message: string,
-  history: any[]
-): Promise<TaskIntent> {
+// Rule-based intent classification (no API calls, instant response)
+function classifyTaskIntent(message: string, history: any[]): TaskIntent {
   const lower = message.toLowerCase();
   
-  // Quick rule-based classification for system commands
+  // System commands
   if (lower.includes('subscribe') || lower.includes('sign up') || lower === '3') {
     return 'subscribe';
   }
@@ -281,54 +274,34 @@ async function classifyTaskIntent(
     return 'request_update';
   }
   
-  // Use orchestrator model for complex intent classification
-  const classificationPrompt = `Analyze this user message and classify the task intent. Consider the conversation history for context.
-
-User message: "${message}"
-
-Task intents:
-- general_question: Simple questions, greetings, casual conversation
-- web_search: Questions requiring current information, real-time data, location-based queries, hotel/restaurant searches
-- reasoning: Complex problem-solving, analysis, mathematical problems, logic puzzles
-- planning: Creating itineraries, schedules, structured plans, step-by-step guides
-- image_generation: Requests to create, generate, or draw images
-- image_understanding: Analyzing, describing, or interpreting images (if image is included)
-
-Reply with ONLY the intent name, nothing else.`;
-
-  try {
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: MODEL_REGISTRY.orchestrator,
-        messages: [
-          { role: 'system', content: 'You are a task classifier. Respond only with the intent name.' },
-          { role: 'user', content: classificationPrompt }
-        ],
-        temperature: 0.1,
-        max_tokens: 20,
-      }),
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      const intent = data.choices?.[0]?.message?.content?.trim().toLowerCase();
-      
-      // Validate intent
-      const validIntents: TaskIntent[] = ['general_question', 'web_search', 'reasoning', 'planning', 'image_generation', 'image_understanding'];
-      if (validIntents.includes(intent as TaskIntent)) {
-        return intent as TaskIntent;
-      }
-    }
-  } catch (error) {
-    console.error('Intent classification error:', error);
+  // Web search indicators
+  if (
+    lower.includes('hotel') || lower.includes('restaurant') || lower.includes('weather') ||
+    lower.includes('current') || lower.includes('today') || lower.includes('now') ||
+    lower.includes('search for') || lower.includes('find me') || lower.includes('where can i')
+  ) {
+    return 'web_search';
   }
   
-  // Default fallback
+  // Planning indicators
+  if (
+    lower.includes('plan') || lower.includes('itinerary') || lower.includes('schedule') ||
+    lower.includes('create a') && (lower.includes('trip') || lower.includes('roadmap')) ||
+    lower.includes('step by step')
+  ) {
+    return 'planning';
+  }
+  
+  // Reasoning indicators
+  if (
+    lower.includes('calculate') || lower.includes('solve') || lower.includes('analyze') ||
+    lower.includes('compare') || lower.includes('why') && lower.includes('how') ||
+    lower.includes('explain') && lower.includes('detail')
+  ) {
+    return 'reasoning';
+  }
+  
+  // Default to general question
   return 'general_question';
 }
 
@@ -349,28 +322,23 @@ async function executeWithSpecializedModel(
   switch (intent) {
     case 'web_search':
       selectedModel = MODEL_REGISTRY.web_search;
-      specializedSystemPrompt = `${systemPrompt}\n\nYou have web search capabilities. Provide current, factual information with sources when possible.`;
+      specializedSystemPrompt = `${systemPrompt}\n\nProvide current, factual information. Be concise and helpful.`;
       break;
     
     case 'reasoning':
-    case 'planning':
       selectedModel = MODEL_REGISTRY.heavy_reasoning;
-      specializedSystemPrompt = `${systemPrompt}\n\nYou are excellent at reasoning and problem-solving. Think step-by-step and provide detailed, logical explanations.`;
+      specializedSystemPrompt = `${systemPrompt}\n\nThink step-by-step. Break down complex problems logically.`;
       break;
     
-    case 'image_generation':
-      selectedModel = MODEL_REGISTRY.image_generation;
-      specializedSystemPrompt = 'You are an image generation assistant. Create detailed, vivid images based on user descriptions.';
-      break;
-    
-    case 'image_understanding':
-      selectedModel = MODEL_REGISTRY.multimodal;
-      specializedSystemPrompt = `${systemPrompt}\n\nYou can understand and analyze images. Provide detailed, accurate descriptions.`;
+    case 'planning':
+      selectedModel = MODEL_REGISTRY.planning;
+      specializedSystemPrompt = `${systemPrompt}\n\nCreate structured, detailed plans with clear steps. Be organized and thorough.`;
       break;
     
     case 'general_question':
     default:
       selectedModel = MODEL_REGISTRY.general_chat;
+      specializedSystemPrompt = `${systemPrompt}\n\nBe friendly, concise, and helpful. Keep answers under 200 words unless asked for detail.`;
       break;
   }
   
@@ -405,8 +373,38 @@ async function executeWithSpecializedModel(
       const errorText = await response.text();
       console.error('Model execution error:', response.status, errorText);
       
+      // If rate limited, try fallback model
+      if (response.status === 429 && selectedModel !== MODEL_REGISTRY.fallback) {
+        console.log('Rate limited, trying fallback model:', MODEL_REGISTRY.fallback);
+        
+        const fallbackResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': supabaseUrl,
+            'X-Title': 'InfoNiblet Multi-Modal Bot',
+          },
+          body: JSON.stringify({
+            model: MODEL_REGISTRY.fallback,
+            messages,
+            temperature: 0.7,
+          }),
+        });
+        
+        if (fallbackResponse.ok) {
+          const fallbackData = await fallbackResponse.json();
+          const fallbackAiResponse = fallbackData.choices?.[0]?.message?.content || 'Sorry, I could not generate a response.';
+          return {
+            response: fallbackAiResponse,
+            model: MODEL_REGISTRY.fallback,
+            toolCalls: null
+          };
+        }
+      }
+      
       if (response.status === 429) {
-        return { response: '⏱️ Rate limit exceeded. Please try again in a moment.', model: selectedModel };
+        return { response: '⏱️ All models are temporarily busy. Please try again in a moment.', model: selectedModel };
       } else if (response.status === 402) {
         return { response: '💳 API credits exhausted. Please contact admin.', model: selectedModel };
       } else {
