@@ -122,6 +122,7 @@ export type Database = {
           message_content: string
           message_id: string | null
           message_type: string
+          model_used: string | null
           phone_number: string
           received_at: string
           sender: string
@@ -136,6 +137,7 @@ export type Database = {
           message_content: string
           message_id?: string | null
           message_type?: string
+          model_used?: string | null
           phone_number: string
           received_at?: string
           sender: string
@@ -150,6 +152,7 @@ export type Database = {
           message_content?: string
           message_id?: string | null
           message_type?: string
+          model_used?: string | null
           phone_number?: string
           received_at?: string
           sender?: string
