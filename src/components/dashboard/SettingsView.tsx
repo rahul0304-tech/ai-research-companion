@@ -21,7 +21,7 @@ export const SettingsView = () => {
   const [systemPrompt, setSystemPrompt] = useState('');
   const [updateFrequency, setUpdateFrequency] = useState(6);
   const [maxImagesPerDay, setMaxImagesPerDay] = useState(10);
-  const [openRouterModel, setOpenRouterModel] = useState('openai/gpt-4o');
+  const [openRouterModel, setOpenRouterModel] = useState('nvidia/nemotron-nano-12b-v2-vl:free');
 
   useEffect(() => {
     loadSettings();
