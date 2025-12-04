@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Settings, Save } from "lucide-react";
+import { Loader2, Settings, Save, Copy, CheckCircle } from "lucide-react";
 import { toast } from "sonner";
 
 interface Setting {
@@ -22,6 +22,10 @@ export const SettingsView = () => {
   const [updateFrequency, setUpdateFrequency] = useState(6);
   const [maxImagesPerDay, setMaxImagesPerDay] = useState(10);
   const [openRouterModel, setOpenRouterModel] = useState('nvidia/nemotron-nano-12b-v2-vl:free');
+  const [phoneNumberId, setPhoneNumberId] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/whatsapp-webhook`;
 
   useEffect(() => {
     loadSettings();
@@ -38,29 +42,34 @@ export const SettingsView = () => {
     } else {
       setSettings(data || []);
       
-      // Parse settings
       const promptSetting = data?.find(s => s.setting_key === 'system_prompt');
-      if (promptSetting && typeof promptSetting.setting_value === 'object' && promptSetting.setting_value !== null) {
-        const value = promptSetting.setting_value as any;
-        setSystemPrompt(value.prompt || '');
+      if (promptSetting?.setting_value && typeof promptSetting.setting_value === 'object') {
+        const val = promptSetting.setting_value as Record<string, unknown>;
+        if (val.prompt) setSystemPrompt(val.prompt as string);
       }
       
       const freqSetting = data?.find(s => s.setting_key === 'update_frequency');
-      if (freqSetting && typeof freqSetting.setting_value === 'object' && freqSetting.setting_value !== null) {
-        const value = freqSetting.setting_value as any;
-        setUpdateFrequency(value.hours || 6);
+      if (freqSetting?.setting_value && typeof freqSetting.setting_value === 'object') {
+        const val = freqSetting.setting_value as Record<string, unknown>;
+        if (val.hours) setUpdateFrequency(val.hours as number);
       }
       
       const imagesSetting = data?.find(s => s.setting_key === 'max_images_per_day');
-      if (imagesSetting && typeof imagesSetting.setting_value === 'object' && imagesSetting.setting_value !== null) {
-        const value = imagesSetting.setting_value as any;
-        setMaxImagesPerDay(value.limit || 10);
+      if (imagesSetting?.setting_value && typeof imagesSetting.setting_value === 'object') {
+        const val = imagesSetting.setting_value as Record<string, unknown>;
+        if (val.limit) setMaxImagesPerDay(val.limit as number);
       }
       
       const modelSetting = data?.find(s => s.setting_key === 'openrouter_model');
-      if (modelSetting && typeof modelSetting.setting_value === 'object' && modelSetting.setting_value !== null) {
-        const value = modelSetting.setting_value as any;
-        setOpenRouterModel(value.model || 'openai/gpt-4o');
+      if (modelSetting?.setting_value && typeof modelSetting.setting_value === 'object') {
+        const val = modelSetting.setting_value as Record<string, unknown>;
+        if (val.model) setOpenRouterModel(val.model as string);
+      }
+
+      const phoneSetting = data?.find(s => s.setting_key === 'whatsapp_phone_number_id');
+      if (phoneSetting?.setting_value && typeof phoneSetting.setting_value === 'object') {
+        const val = phoneSetting.setting_value as Record<string, unknown>;
+        if (val.phone_number_id) setPhoneNumberId(val.phone_number_id as string);
       }
     }
     setLoading(false);
@@ -68,31 +77,35 @@ export const SettingsView = () => {
 
   const handleSaveSettings = async () => {
     try {
-      // Update system prompt
       await supabase
         .from('assistant_settings')
         .update({ setting_value: { prompt: systemPrompt } })
         .eq('setting_key', 'system_prompt');
 
-      // Update frequency
       await supabase
         .from('assistant_settings')
         .update({ setting_value: { hours: updateFrequency } })
         .eq('setting_key', 'update_frequency');
 
-      // Update max images
       await supabase
         .from('assistant_settings')
         .update({ setting_value: { limit: maxImagesPerDay } })
         .eq('setting_key', 'max_images_per_day');
 
-      // Update OpenRouter model
       await supabase
         .from('assistant_settings')
         .upsert({ 
           setting_key: 'openrouter_model', 
           setting_value: { model: openRouterModel },
-          description: 'OpenRouter AI model selection'
+          description: 'OpenRouter AI model'
+        }, { onConflict: 'setting_key' });
+
+      await supabase
+        .from('assistant_settings')
+        .upsert({ 
+          setting_key: 'whatsapp_phone_number_id', 
+          setting_value: { phone_number_id: phoneNumberId },
+          description: 'Meta WhatsApp Phone Number ID'
         }, { onConflict: 'setting_key' });
 
       toast.success('Settings saved successfully');
@@ -100,6 +113,13 @@ export const SettingsView = () => {
       console.error('Error saving settings:', error);
       toast.error('Failed to save settings');
     }
+  };
+
+  const copyWebhookUrl = () => {
+    navigator.clipboard.writeText(webhookUrl);
+    setCopied(true);
+    toast.success('Webhook URL copied!');
+    setTimeout(() => setCopied(false), 2000);
   };
 
   if (loading) {
@@ -132,9 +152,6 @@ export const SettingsView = () => {
               placeholder="Enter the system prompt for the AI assistant..."
               className="min-h-[120px]"
             />
-            <p className="text-xs text-muted-foreground">
-              This prompt defines how the AI assistant behaves and responds to users
-            </p>
           </div>
 
           <div className="space-y-2">
@@ -147,9 +164,6 @@ export const SettingsView = () => {
               value={updateFrequency}
               onChange={(e) => setUpdateFrequency(parseInt(e.target.value) || 6)}
             />
-            <p className="text-xs text-muted-foreground">
-              How often to send automated research updates to subscribers
-            </p>
           </div>
 
           <div className="space-y-2">
@@ -162,9 +176,6 @@ export const SettingsView = () => {
               value={maxImagesPerDay}
               onChange={(e) => setMaxImagesPerDay(parseInt(e.target.value) || 10)}
             />
-            <p className="text-xs text-muted-foreground">
-              Maximum number of AI-generated images per user per day
-            </p>
           </div>
 
           <div className="space-y-2">
@@ -174,11 +185,8 @@ export const SettingsView = () => {
               type="text"
               value={openRouterModel}
               onChange={(e) => setOpenRouterModel(e.target.value)}
-              placeholder="e.g., openai/gpt-4o, anthropic/claude-3.5-sonnet"
+              placeholder="e.g., deepseek/deepseek-chat-v3-0324:free"
             />
-            <p className="text-xs text-muted-foreground">
-              Choose from OpenRouter's available models. Popular: openai/gpt-4o, anthropic/claude-3.5-sonnet, google/gemini-pro
-            </p>
           </div>
 
           <Button 
@@ -193,16 +201,54 @@ export const SettingsView = () => {
 
       <Card className="border-border/50 shadow-md bg-card/50 backdrop-blur-sm">
         <CardHeader>
-          <CardTitle className="text-lg">Webhook Configuration</CardTitle>
-          <CardDescription>Use this endpoint for WhatsApp webhooks</CardDescription>
+          <CardTitle className="text-lg">Meta WhatsApp Configuration</CardTitle>
+          <CardDescription>Configure your WhatsApp Business API connection</CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="bg-muted/50 p-4 rounded-lg font-mono text-sm break-all">
-            {import.meta.env.VITE_SUPABASE_URL}/functions/v1/whatsapp-webhook
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="phone-number-id">WhatsApp Phone Number ID</Label>
+            <Input
+              id="phone-number-id"
+              type="text"
+              value={phoneNumberId}
+              onChange={(e) => setPhoneNumberId(e.target.value)}
+              placeholder="Enter your Phone Number ID from Meta"
+            />
+            <p className="text-xs text-muted-foreground">
+              Find this in Meta Business Suite → WhatsApp → API Setup
+            </p>
           </div>
-          <p className="text-xs text-muted-foreground mt-2">
-            Configure this URL in your Twilio or WhatsApp Business API settings
-          </p>
+
+          <div className="space-y-2">
+            <Label>Callback URL</Label>
+            <div className="flex gap-2">
+              <div className="flex-1 bg-muted/50 p-3 rounded-lg font-mono text-sm break-all">
+                {webhookUrl}
+              </div>
+              <Button variant="outline" size="icon" onClick={copyWebhookUrl}>
+                {copied ? <CheckCircle className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Verify Token</Label>
+            <p className="text-sm text-muted-foreground">
+              Use the <code className="bg-muted px-1 rounded">WHATSAPP_VERIFY_TOKEN</code> you configured in secrets
+            </p>
+          </div>
+
+          <div className="bg-muted/30 p-4 rounded-lg space-y-2">
+            <h4 className="font-medium text-sm">Setup Instructions:</h4>
+            <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+              <li>Go to Meta Business Suite → WhatsApp → API Setup</li>
+              <li>Under Webhooks, click "Configure"</li>
+              <li>Paste the Callback URL above</li>
+              <li>Enter your Verify Token</li>
+              <li>Subscribe to "messages" webhook field</li>
+              <li>Save your Phone Number ID above</li>
+            </ol>
+          </div>
         </CardContent>
       </Card>
 
