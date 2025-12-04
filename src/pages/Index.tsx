@@ -74,7 +74,7 @@ const Index = () => {
           <Card className="border-border/50 shadow-md bg-card/50 backdrop-blur-sm transition-smooth hover:shadow-lg hover:-translate-y-1">
             <CardHeader>
               <div className="w-12 h-12 rounded-xl bg-gradient-accent flex items-center justify-center shadow-glow mb-4">
-                <Clock className="w-6 h-6 text-white" />
+                <Clock className="w-6 h-6 text-black" />
               </div>
               <CardTitle className="text-xl">Scheduled Updates</CardTitle>
               <CardDescription>
