@@ -30,7 +30,7 @@ const Index = () => {
             
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center animate-in fade-in slide-in-from-bottom-6 duration-700 delay-300">
               <Link to="/dashboard">
-                <Button size="lg" className="bg-gradient-primary text-white shadow-glow transition-smooth hover:shadow-lg px-8 py-6 text-lg font-semibold">
+                <Button size="lg" className="bg-gradient-primary text-black shadow-glow transition-smooth hover:text-white hover:shadow-lg px-8 py-6 text-lg font-semibold">
                   Open Dashboard
                   <ArrowRight className="ml-2 w-5 h-5" />
                 </Button>
