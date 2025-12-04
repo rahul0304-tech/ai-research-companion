@@ -21,7 +21,7 @@ const Index = () => {
             </div>
             
             <h1 className="text-5xl md:text-7xl font-bold text-foreground animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100">
-              Meet <span className="gradient-primary bg-clip-text text-transparent bg-slate-50">InfoNiblet</span>
+              Meet <span className="gradient-primary bg-clip-text text-transparent bg-primary">InfoNiblet</span>
             </h1>
             
             <p className="text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto animate-in fade-in slide-in-from-bottom-5 duration-700 delay-200">
