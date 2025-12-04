@@ -20,17 +20,42 @@ interface Message {
 
 // Model Registry with specialized capabilities (using most reliable free models)
 const MODEL_REGISTRY = {
-  general_chat: 'deepseek/deepseek-chat-v3-0324:free', // Reliable, good uptime
-  heavy_reasoning: 'deepseek/deepseek-r1:free', // Excellent reasoning
-  web_search: 'deepseek/deepseek-chat-v3-0324:free', // Good for current info
-  planning: 'deepseek/deepseek-r1:free', // Best for structured thinking
-  fallback: 'nvidia/nemotron-nano-12b-v2-vl:free' // Ultra-reliable fallback
+  general_chat: 'deepseek/deepseek-chat-v3-0324:free',
+  heavy_reasoning: 'deepseek/deepseek-r1:free',
+  web_search: 'deepseek/deepseek-chat-v3-0324:free',
+  planning: 'deepseek/deepseek-r1:free',
+  fallback: 'nvidia/nemotron-nano-12b-v2-vl:free'
 };
 
 type TaskIntent = 'general_question' | 'web_search' | 'reasoning' | 'planning' | 'subscribe' | 'unsubscribe' | 'request_update';
 
+// Send message via Meta WhatsApp API
+async function sendWhatsAppMessage(phoneNumberId: string, accessToken: string, to: string, message: string) {
+  console.log('Sending WhatsApp message via Meta API:', { phoneNumberId, to, messageLength: message.length });
+  
+  const response = await fetch(
+    `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        to: to,
+        type: 'text',
+        text: { body: message }
+      })
+    }
+  );
+  
+  const result = await response.json();
+  console.log('Meta API response:', result);
+  return result;
+}
+
 serve(async (req) => {
-  // Log all incoming requests
   console.log('Webhook called:', {
     method: req.method,
     url: req.url,
@@ -41,31 +66,32 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Handle GET requests (Twilio webhook validation)
+  // Handle Meta webhook verification (GET request)
   if (req.method === 'GET') {
-    console.log('GET request received - webhook validation');
-    return new Response(
-      JSON.stringify({
-        status: 'ok',
-        service: 'whatsapp-webhook',
-        timestamp: new Date().toISOString()
-      }),
-      {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      }
-    );
+    const url = new URL(req.url);
+    const mode = url.searchParams.get('hub.mode');
+    const token = url.searchParams.get('hub.verify_token');
+    const challenge = url.searchParams.get('hub.challenge');
+    
+    const verifyToken = Deno.env.get('WHATSAPP_VERIFY_TOKEN');
+    
+    console.log('Webhook verification attempt:', { mode, token, challenge, expectedToken: verifyToken });
+    
+    if (mode === 'subscribe' && token === verifyToken) {
+      console.log('Webhook verified successfully');
+      return new Response(challenge, { status: 200, headers: corsHeaders });
+    }
+    
+    console.log('Webhook verification failed');
+    return new Response('Forbidden', { status: 403, headers: corsHeaders });
   }
 
   // Only process POST requests for messages
   if (req.method !== 'POST') {
     console.log('Unsupported method:', req.method);
     return new Response(
-      JSON.stringify({ error: 'Method not allowed. Use POST for messages or GET for validation.' }),
-      {
-        status: 405,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      }
+      JSON.stringify({ error: 'Method not allowed' }),
+      { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
 
@@ -73,57 +99,75 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const openRouterApiKey = Deno.env.get('OPENROUTER_API_KEY')!;
+    const whatsappAccessToken = Deno.env.get('WHATSAPP_ACCESS_TOKEN')!;
     
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Parse incoming webhook - support both Twilio and Meta formats
-    let phone_number = '';
-    let message_content = '';
-    let message_id = '';
-    
-    const contentType = req.headers.get('content-type') || '';
-    
-    if (contentType.includes('application/json')) {
-      const body = await req.json();
-      
-      // Meta/WhatsApp Business API format
-      if (body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) {
-        const msg = body.entry[0].changes[0].value.messages[0];
-        phone_number = msg.from;
-        message_content = msg.text?.body || msg.caption || '';
-        message_id = msg.id;
-      } else {
-        // Generic JSON format
-        phone_number = body.phone_number || body.From || '';
-        message_content = body.message || body.Body || '';
-        message_id = body.message_id || '';
-      }
-    } else {
-      // Twilio form-urlencoded format
-      const formData = await req.formData();
-      phone_number = formData.get('From') as string || '';
-      message_content = formData.get('Body') as string || '';
-      message_id = formData.get('MessageSid') as string || '';
+    // Parse Meta webhook payload
+    const body = await req.json();
+    console.log('Received webhook body:', JSON.stringify(body, null, 2));
+
+    // Acknowledge receipt immediately (Meta requires quick response)
+    // We'll process the message after
+
+    // Check if this is a status update (not a message)
+    if (body.entry?.[0]?.changes?.[0]?.value?.statuses) {
+      console.log('Received status update, ignoring');
+      return new Response(JSON.stringify({ status: 'ok' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
     }
 
-    console.log('Parsed message data:', { phone_number, message_content, message_id });
+    // Extract message from Meta format
+    const entry = body.entry?.[0];
+    const changes = entry?.changes?.[0];
+    const value = changes?.value;
+    const messages = value?.messages;
 
-    // Validate required data
+    if (!messages || messages.length === 0) {
+      console.log('No messages in webhook payload');
+      return new Response(JSON.stringify({ status: 'ok' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    const msg = messages[0];
+    const phone_number = msg.from;
+    const message_content = msg.text?.body || msg.caption || '';
+    const message_id = msg.id;
+    const phoneNumberId = value?.metadata?.phone_number_id;
+
+    console.log('Parsed message:', { phone_number, message_content, message_id, phoneNumberId });
+
     if (!phone_number || !message_content) {
-      console.error('Missing required data:', { phone_number: !!phone_number, message_content: !!message_content });
-      return new Response(
-        JSON.stringify({ 
-          error: 'Missing required fields',
-          details: 'phone_number and message_content are required'
-        }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        }
-      );
+      console.error('Missing required data');
+      return new Response(JSON.stringify({ status: 'ok' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
     }
 
-    console.log('Valid message received:', { phone_number, message_content, message_id });
+    // Get phone number ID from settings if not in webhook
+    let finalPhoneNumberId = phoneNumberId;
+    if (!finalPhoneNumberId) {
+      const { data: settings } = await supabase
+        .from('assistant_settings')
+        .select('setting_value')
+        .eq('setting_key', 'whatsapp_phone_number_id')
+        .single();
+      
+      finalPhoneNumberId = settings?.setting_value?.phone_number_id;
+    }
+
+    if (!finalPhoneNumberId) {
+      console.error('No phone number ID available');
+      return new Response(JSON.stringify({ error: 'Phone number ID not configured' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
 
     // Store incoming message
     const userMessage: Message = {
@@ -167,9 +211,8 @@ serve(async (req) => {
     const modelSetting = settings?.find(s => s.setting_key === 'openrouter_model');
     const aiModel = modelSetting?.setting_value?.model || 'nvidia/nemotron-nano-12b-v2-vl:free';
 
-    // Use rule-based classification (no API call needed)
+    // Classify intent
     const taskIntent = classifyTaskIntent(message_content, conversationHistory);
-    
     console.log('Classified task intent:', taskIntent);
 
     // Handle different intents
@@ -203,7 +246,6 @@ serve(async (req) => {
       }
       selectedModel = 'system';
     } else {
-      // Execute task with specialized model
       const executionResult = await executeWithSpecializedModel(
         openRouterApiKey,
         supabaseUrl,
@@ -218,7 +260,7 @@ serve(async (req) => {
       toolCalls = executionResult.toolCalls;
     }
 
-    // Store AI response with model tracking
+    // Store AI response
     await supabase.from('whatsapp_messages').insert({
       phone_number,
       sender: 'assistant',
@@ -230,40 +272,27 @@ serve(async (req) => {
       model_used: selectedModel,
     });
 
-    // Return response in TwiML format for Twilio or simple JSON
-    const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Message>${escapeXml(aiResponse)}</Message>
-</Response>`;
+    // Send response via Meta API
+    await sendWhatsAppMessage(finalPhoneNumberId, whatsappAccessToken, phone_number, aiResponse);
 
-    return new Response(twimlResponse, {
-      headers: { ...corsHeaders, 'Content-Type': 'text/xml' },
+    return new Response(JSON.stringify({ status: 'ok' }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
 
   } catch (error) {
     console.error('Webhook error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    
-    // Return TwiML error response for compatibility
-    const twimlError = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Message>Error processing message: ${escapeXml(errorMessage)}</Message>
-</Response>`;
-    
-    return new Response(twimlError, {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'text/xml' }
+    return new Response(JSON.stringify({ error: 'Internal error' }), {
+      status: 200, // Return 200 to prevent Meta from retrying
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
 });
 
-// Helper functions
-
-// Rule-based intent classification (no API calls, instant response)
+// Rule-based intent classification
 function classifyTaskIntent(message: string, history: any[]): TaskIntent {
   const lower = message.toLowerCase();
   
-  // System commands
   if (lower.includes('subscribe') || lower.includes('sign up') || lower === '3') {
     return 'subscribe';
   }
@@ -274,7 +303,6 @@ function classifyTaskIntent(message: string, history: any[]): TaskIntent {
     return 'request_update';
   }
   
-  // Web search indicators
   if (
     lower.includes('hotel') || lower.includes('restaurant') || lower.includes('weather') ||
     lower.includes('current') || lower.includes('today') || lower.includes('now') ||
@@ -283,7 +311,6 @@ function classifyTaskIntent(message: string, history: any[]): TaskIntent {
     return 'web_search';
   }
   
-  // Planning indicators
   if (
     lower.includes('plan') || lower.includes('itinerary') || lower.includes('schedule') ||
     lower.includes('create a') && (lower.includes('trip') || lower.includes('roadmap')) ||
@@ -292,7 +319,6 @@ function classifyTaskIntent(message: string, history: any[]): TaskIntent {
     return 'planning';
   }
   
-  // Reasoning indicators
   if (
     lower.includes('calculate') || lower.includes('solve') || lower.includes('analyze') ||
     lower.includes('compare') || lower.includes('why') && lower.includes('how') ||
@@ -301,7 +327,6 @@ function classifyTaskIntent(message: string, history: any[]): TaskIntent {
     return 'reasoning';
   }
   
-  // Default to general question
   return 'general_question';
 }
 
@@ -315,7 +340,6 @@ async function executeWithSpecializedModel(
   systemPrompt: string
 ): Promise<{ response: string; model: string; toolCalls?: any }> {
   
-  // Select model based on intent
   let selectedModel = MODEL_REGISTRY.general_chat;
   let specializedSystemPrompt = systemPrompt;
   
@@ -324,29 +348,23 @@ async function executeWithSpecializedModel(
       selectedModel = MODEL_REGISTRY.web_search;
       specializedSystemPrompt = `${systemPrompt}\n\nProvide current, factual information. Be concise and helpful.`;
       break;
-    
     case 'reasoning':
       selectedModel = MODEL_REGISTRY.heavy_reasoning;
       specializedSystemPrompt = `${systemPrompt}\n\nThink step-by-step. Break down complex problems logically.`;
       break;
-    
     case 'planning':
       selectedModel = MODEL_REGISTRY.planning;
-      specializedSystemPrompt = `${systemPrompt}\n\nCreate structured, detailed plans with clear steps. Be organized and thorough.`;
+      specializedSystemPrompt = `${systemPrompt}\n\nCreate structured, detailed plans with clear steps.`;
       break;
-    
-    case 'general_question':
     default:
       selectedModel = MODEL_REGISTRY.general_chat;
-      specializedSystemPrompt = `${systemPrompt}\n\nBe friendly, concise, and helpful. Keep answers under 200 words unless asked for detail.`;
+      specializedSystemPrompt = `${systemPrompt}\n\nBe friendly, concise, and helpful.`;
       break;
   }
   
   console.log(`Executing with ${intent} using model: ${selectedModel}`);
   
-  // Build optimized context (last 10 messages to stay within token limits)
   const recentHistory = history.slice(-10);
-  
   const messages = [
     { role: 'system', content: specializedSystemPrompt },
     ...recentHistory,
@@ -360,7 +378,7 @@ async function executeWithSpecializedModel(
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
         'HTTP-Referer': supabaseUrl,
-        'X-Title': 'InfoNiblet Multi-Modal Bot',
+        'X-Title': 'InfoNiblet Bot',
       },
       body: JSON.stringify({
         model: selectedModel,
@@ -371,11 +389,10 @@ async function executeWithSpecializedModel(
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Model execution error:', response.status, errorText);
+      console.error('Model error:', response.status, errorText);
       
-      // If rate limited, try fallback model
       if (response.status === 429 && selectedModel !== MODEL_REGISTRY.fallback) {
-        console.log('Rate limited, trying fallback model:', MODEL_REGISTRY.fallback);
+        console.log('Rate limited, trying fallback');
         
         const fallbackResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
@@ -383,7 +400,7 @@ async function executeWithSpecializedModel(
             'Authorization': `Bearer ${apiKey}`,
             'Content-Type': 'application/json',
             'HTTP-Referer': supabaseUrl,
-            'X-Title': 'InfoNiblet Multi-Modal Bot',
+            'X-Title': 'InfoNiblet Bot',
           },
           body: JSON.stringify({
             model: MODEL_REGISTRY.fallback,
@@ -394,39 +411,28 @@ async function executeWithSpecializedModel(
         
         if (fallbackResponse.ok) {
           const fallbackData = await fallbackResponse.json();
-          const fallbackAiResponse = fallbackData.choices?.[0]?.message?.content || 'Sorry, I could not generate a response.';
           return {
-            response: fallbackAiResponse,
+            response: fallbackData.choices?.[0]?.message?.content || 'Sorry, I could not generate a response.',
             model: MODEL_REGISTRY.fallback,
-            toolCalls: null
           };
         }
       }
       
       if (response.status === 429) {
-        return { response: '⏱️ All models are temporarily busy. Please try again in a moment.', model: selectedModel };
-      } else if (response.status === 402) {
-        return { response: '💳 API credits exhausted. Please contact admin.', model: selectedModel };
-      } else {
-        return { response: '❌ Sorry, I encountered an error. Please try again.', model: selectedModel };
+        return { response: '⏱️ Service busy. Please try again shortly.', model: selectedModel };
       }
+      return { response: '❌ Error occurred. Please try again.', model: selectedModel };
     }
 
     const data = await response.json();
-    const aiResponse = data.choices?.[0]?.message?.content || 'Sorry, I could not generate a response.';
-    
     return {
-      response: aiResponse,
+      response: data.choices?.[0]?.message?.content || 'Sorry, I could not generate a response.',
       model: selectedModel,
-      toolCalls: null
     };
     
   } catch (error) {
     console.error('Execution error:', error);
-    return {
-      response: '❌ An error occurred while processing your request.',
-      model: selectedModel
-    };
+    return { response: '❌ An error occurred.', model: selectedModel };
   }
 }
 
@@ -440,7 +446,7 @@ async function handleSubscription(supabase: any, phone: string, action: 'subscri
       success: !error,
       message: error 
         ? '❌ Subscription failed. Please try again.'
-        : '✅ Subscribed! You\'ll get AI news updates every 6 hours. Reply STOP to unsubscribe.'
+        : '✅ Subscribed! You\'ll get AI news updates. Reply STOP to unsubscribe.'
     };
   } else {
     const { error } = await supabase
@@ -452,16 +458,7 @@ async function handleSubscription(supabase: any, phone: string, action: 'subscri
       success: !error,
       message: error
         ? '❌ Failed to unsubscribe. Please try again.'
-        : '👋 You\'ve been unsubscribed. Reply SUBSCRIBE to start receiving updates again.'
+        : '👋 Unsubscribed. Reply SUBSCRIBE to start again.'
     };
   }
-}
-
-function escapeXml(unsafe: string): string {
-  return unsafe
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
 }
