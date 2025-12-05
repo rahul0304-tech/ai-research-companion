@@ -29,12 +29,12 @@ const MODEL_REGISTRY = {
 
 type TaskIntent = 'general_question' | 'web_search' | 'reasoning' | 'planning' | 'subscribe' | 'unsubscribe' | 'request_update';
 
-// Send message via Meta WhatsApp API
+// Send message via Meta WhatsApp API v21.0
 async function sendWhatsAppMessage(phoneNumberId: string, accessToken: string, to: string, message: string) {
   console.log('Sending WhatsApp message via Meta API:', { phoneNumberId, to, messageLength: message.length });
   
   const response = await fetch(
-    `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+    `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
     {
       method: 'POST',
       headers: {
@@ -43,6 +43,7 @@ async function sendWhatsAppMessage(phoneNumberId: string, accessToken: string, t
       },
       body: JSON.stringify({
         messaging_product: 'whatsapp',
+        recipient_type: 'individual',
         to: to,
         type: 'text',
         text: { body: message }
@@ -100,6 +101,7 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const openRouterApiKey = Deno.env.get('OPENROUTER_API_KEY')!;
     const whatsappAccessToken = Deno.env.get('WHATSAPP_ACCESS_TOKEN')!;
+    const whatsappPhoneNumberId = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID')!;
     
     const supabase = createClient(supabaseUrl, supabaseKey);
 
@@ -137,33 +139,12 @@ serve(async (req) => {
     const phone_number = msg.from;
     const message_content = msg.text?.body || msg.caption || '';
     const message_id = msg.id;
-    const phoneNumberId = value?.metadata?.phone_number_id;
 
-    console.log('Parsed message:', { phone_number, message_content, message_id, phoneNumberId });
+    console.log('Parsed message:', { phone_number, message_content, message_id });
 
     if (!phone_number || !message_content) {
       console.error('Missing required data');
       return new Response(JSON.stringify({ status: 'ok' }), {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-    // Get phone number ID from settings if not in webhook
-    let finalPhoneNumberId = phoneNumberId;
-    if (!finalPhoneNumberId) {
-      const { data: settings } = await supabase
-        .from('assistant_settings')
-        .select('setting_value')
-        .eq('setting_key', 'whatsapp_phone_number_id')
-        .single();
-      
-      finalPhoneNumberId = settings?.setting_value?.phone_number_id;
-    }
-
-    if (!finalPhoneNumberId) {
-      console.error('No phone number ID available');
-      return new Response(JSON.stringify({ error: 'Phone number ID not configured' }), {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
@@ -273,7 +254,7 @@ serve(async (req) => {
     });
 
     // Send response via Meta API
-    await sendWhatsAppMessage(finalPhoneNumberId, whatsappAccessToken, phone_number, aiResponse);
+    await sendWhatsAppMessage(whatsappPhoneNumberId, whatsappAccessToken, phone_number, aiResponse);
 
     return new Response(JSON.stringify({ status: 'ok' }), {
       status: 200,
