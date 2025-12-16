@@ -4,11 +4,23 @@ import { MessagesView } from "@/components/dashboard/MessagesView";
 import { UpdatesView } from "@/components/dashboard/UpdatesView";
 import { SubscriptionsView } from "@/components/dashboard/SubscriptionsView";
 import { SettingsView } from "@/components/dashboard/SettingsView";
-import { MessageSquare, Sparkles, Users, Settings } from "lucide-react";
+import { MessageSquare, Sparkles, Users, Settings, LogOut } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 
 const Dashboard = () => {
   const [activeTab, setActiveTab] = useState("messages");
+  const { signOut, user } = useAuth();
+  const navigate = useNavigate();
+
+  const handleSignOut = async () => {
+    await signOut();
+    toast.success("Signed out successfully");
+    navigate("/auth");
+  };
 
   return (
     <div className="min-h-screen bg-gradient-subtle">
@@ -24,7 +36,13 @@ const Dashboard = () => {
                 <p className="text-sm text-muted-foreground">AI Research Assistant Dashboard</p>
               </div>
             </div>
-            <ThemeToggle />
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground hidden sm:block">{user?.email}</span>
+              <ThemeToggle />
+              <Button variant="ghost" size="icon" onClick={handleSignOut} title="Sign Out">
+                <LogOut className="w-4 h-4" />
+              </Button>
+            </div>
           </div>
         </div>
       </div>
