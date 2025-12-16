@@ -29,6 +29,48 @@ const MODEL_REGISTRY = {
 
 type TaskIntent = 'general_question' | 'web_search' | 'reasoning' | 'planning' | 'subscribe' | 'unsubscribe' | 'request_update';
 
+// Verify Meta webhook signature
+async function verifyWebhookSignature(
+  payload: string,
+  signature: string | null,
+  appSecret: string
+): Promise<boolean> {
+  if (!signature) {
+    console.log('No signature provided');
+    return false;
+  }
+  
+  const signatureHash = signature.split('sha256=')[1];
+  if (!signatureHash) {
+    console.log('Invalid signature format');
+    return false;
+  }
+
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(appSecret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+
+  const signatureBytes = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    encoder.encode(payload)
+  );
+
+  const computedHash = Array.from(new Uint8Array(signatureBytes))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+
+  const isValid = computedHash === signatureHash;
+  console.log('Signature verification:', { isValid, computedHash: computedHash.substring(0, 10) + '...', receivedHash: signatureHash.substring(0, 10) + '...' });
+  
+  return isValid;
+}
+
 // Send message via Meta WhatsApp API v21.0
 async function sendWhatsAppMessage(phoneNumberId: string, accessToken: string, to: string, message: string) {
   console.log('Sending WhatsApp message via Meta API:', { phoneNumberId, to, messageLength: message.length });
@@ -60,7 +102,6 @@ serve(async (req) => {
   console.log('Webhook called:', {
     method: req.method,
     url: req.url,
-    headers: Object.fromEntries(req.headers.entries())
   });
 
   if (req.method === 'OPTIONS') {
@@ -96,6 +137,31 @@ serve(async (req) => {
     );
   }
 
+  // Verify webhook signature for POST requests
+  const appSecret = Deno.env.get('WHATSAPP_APP_SECRET');
+  if (!appSecret) {
+    console.error('WHATSAPP_APP_SECRET not configured');
+    return new Response(JSON.stringify({ error: 'Server configuration error' }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  }
+
+  const rawBody = await req.text();
+  const signature = req.headers.get('X-Hub-Signature-256');
+  
+  const isValidSignature = await verifyWebhookSignature(rawBody, signature, appSecret);
+  
+  if (!isValidSignature) {
+    console.error('Invalid webhook signature - rejecting request');
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  }
+  
+  console.log('Webhook signature verified successfully');
+
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -105,8 +171,8 @@ serve(async (req) => {
     
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Parse Meta webhook payload
-    const body = await req.json();
+    // Parse Meta webhook payload (already read as text for signature verification)
+    const body = JSON.parse(rawBody);
     console.log('Received webhook body:', JSON.stringify(body, null, 2));
 
     // Acknowledge receipt immediately (Meta requires quick response)
