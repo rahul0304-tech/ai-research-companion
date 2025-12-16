@@ -72,119 +72,61 @@ async function verifyWebhookSignature(
 }
 
 // Send message via Meta WhatsApp API v21.0
-async function sendWhatsAppMessage(phoneNumberId: string, accessToken: string, to: string, message: string) {
+async function sendWhatsAppMessage(phoneNumberId: string, accessToken: string, to: string, message: string): Promise<any> {
   console.log('Sending WhatsApp message via Meta API:', { phoneNumberId, to, messageLength: message.length });
   
-  const response = await fetch(
-    `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp',
-        recipient_type: 'individual',
-        to: to,
-        type: 'text',
-        text: { body: message }
-      })
+  try {
+    const response = await fetch(
+      `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: to,
+          type: 'text',
+          text: { body: message }
+        })
+      }
+    );
+    
+    const result = await response.json();
+    console.log('Meta API response:', JSON.stringify(result));
+    
+    if (!response.ok) {
+      console.error('Meta API error - Status:', response.status, 'Response:', JSON.stringify(result));
     }
-  );
-  
-  const result = await response.json();
-  console.log('Meta API response:', result);
-  return result;
+    
+    return result;
+  } catch (error) {
+    console.error('sendWhatsAppMessage error:', error);
+    return { error: String(error) };
+  }
 }
 
-serve(async (req) => {
-  console.log('Webhook called:', {
-    method: req.method,
-    url: req.url,
-  });
-
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
-
-  // Handle Meta webhook verification (GET request)
-  if (req.method === 'GET') {
-    const url = new URL(req.url);
-    const mode = url.searchParams.get('hub.mode');
-    const token = url.searchParams.get('hub.verify_token');
-    const challenge = url.searchParams.get('hub.challenge');
-    
-    const verifyToken = Deno.env.get('WHATSAPP_VERIFY_TOKEN');
-    
-    console.log('Webhook verification attempt:', { mode, token, challenge, expectedToken: verifyToken });
-    
-    if (mode === 'subscribe' && token === verifyToken) {
-      console.log('Webhook verified successfully');
-      return new Response(challenge, { status: 200, headers: corsHeaders });
-    }
-    
-    console.log('Webhook verification failed');
-    return new Response('Forbidden', { status: 403, headers: corsHeaders });
-  }
-
-  // Only process POST requests for messages
-  if (req.method !== 'POST') {
-    console.log('Unsupported method:', req.method);
-    return new Response(
-      JSON.stringify({ error: 'Method not allowed' }),
-      { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
-  }
-
-  // Verify webhook signature for POST requests
-  const appSecret = Deno.env.get('WHATSAPP_APP_SECRET');
-  if (!appSecret) {
-    console.error('WHATSAPP_APP_SECRET not configured');
-    return new Response(JSON.stringify({ error: 'Server configuration error' }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    });
-  }
-
-  const rawBody = await req.text();
-  const signature = req.headers.get('X-Hub-Signature-256');
-  
-  const isValidSignature = await verifyWebhookSignature(rawBody, signature, appSecret);
-  
-  if (!isValidSignature) {
-    console.error('Invalid webhook signature - rejecting request');
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    });
-  }
-  
-  console.log('Webhook signature verified successfully');
-
+// Background processing function
+async function processMessage(
+  rawBody: string,
+  supabaseUrl: string,
+  supabaseKey: string,
+  openRouterApiKey: string,
+  whatsappAccessToken: string,
+  whatsappPhoneNumberId: string
+): Promise<void> {
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const openRouterApiKey = Deno.env.get('OPENROUTER_API_KEY')!;
-    const whatsappAccessToken = Deno.env.get('WHATSAPP_ACCESS_TOKEN')!;
-    const whatsappPhoneNumberId = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID')!;
+    console.log('Starting background message processing');
     
     const supabase = createClient(supabaseUrl, supabaseKey);
-
-    // Parse Meta webhook payload (already read as text for signature verification)
     const body = JSON.parse(rawBody);
-    console.log('Received webhook body:', JSON.stringify(body, null, 2));
-
-    // Acknowledge receipt immediately (Meta requires quick response)
-    // We'll process the message after
 
     // Check if this is a status update (not a message)
     if (body.entry?.[0]?.changes?.[0]?.value?.statuses) {
       console.log('Received status update, ignoring');
-      return new Response(JSON.stringify({ status: 'ok' }), {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
+      return;
     }
 
     // Extract message from Meta format
@@ -195,10 +137,7 @@ serve(async (req) => {
 
     if (!messages || messages.length === 0) {
       console.log('No messages in webhook payload');
-      return new Response(JSON.stringify({ status: 'ok' }), {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
+      return;
     }
 
     const msg = messages[0];
@@ -209,11 +148,8 @@ serve(async (req) => {
     console.log('Parsed message:', { phone_number, message_content, message_id });
 
     if (!phone_number || !message_content) {
-      console.error('Missing required data');
-      return new Response(JSON.stringify({ status: 'ok' }), {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
+      console.error('Missing required data - phone_number or message_content');
+      return;
     }
 
     // Store incoming message
@@ -308,7 +244,7 @@ serve(async (req) => {
     }
 
     // Store AI response
-    await supabase.from('whatsapp_messages').insert({
+    const { error: storeError } = await supabase.from('whatsapp_messages').insert({
       phone_number,
       sender: 'assistant',
       message_type: 'text',
@@ -319,9 +255,151 @@ serve(async (req) => {
       model_used: selectedModel,
     });
 
-    // Send response via Meta API
-    await sendWhatsAppMessage(whatsappPhoneNumberId, whatsappAccessToken, phone_number, aiResponse);
+    if (storeError) {
+      console.error('Error storing AI response:', storeError);
+    }
 
+    // Send response via Meta API
+    const sendResult = await sendWhatsAppMessage(whatsappPhoneNumberId, whatsappAccessToken, phone_number, aiResponse);
+    console.log('WhatsApp send result:', JSON.stringify(sendResult));
+    
+    console.log('Background processing completed successfully');
+
+  } catch (error) {
+    console.error('Background processing error:', error);
+    // Don't throw - we've already returned 200 to Meta
+  }
+}
+
+serve(async (req) => {
+  console.log('Webhook called:', {
+    method: req.method,
+    url: req.url,
+  });
+
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  // Handle Meta webhook verification (GET request)
+  if (req.method === 'GET') {
+    try {
+      const url = new URL(req.url);
+      const mode = url.searchParams.get('hub.mode');
+      const token = url.searchParams.get('hub.verify_token');
+      const challenge = url.searchParams.get('hub.challenge');
+      
+      const verifyToken = Deno.env.get('WHATSAPP_VERIFY_TOKEN');
+      
+      console.log('Webhook verification attempt:', { mode, token, challenge, expectedToken: verifyToken });
+      
+      if (mode === 'subscribe' && token === verifyToken) {
+        console.log('Webhook verified successfully');
+        return new Response(challenge, { status: 200, headers: corsHeaders });
+      }
+      
+      console.log('Webhook verification failed');
+      return new Response('Forbidden', { status: 403, headers: corsHeaders });
+    } catch (error) {
+      console.error('GET verification error:', error);
+      return new Response('Error', { status: 500, headers: corsHeaders });
+    }
+  }
+
+  // Only process POST requests for messages
+  if (req.method !== 'POST') {
+    console.log('Unsupported method:', req.method);
+    return new Response(
+      JSON.stringify({ status: 'ok' }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  // Main POST handler - wrapped in try/catch, always return 200
+  try {
+    // Read body first
+    const rawBody = await req.text();
+    console.log('Received raw body length:', rawBody.length);
+
+    // Verify webhook signature
+    const appSecret = Deno.env.get('WHATSAPP_APP_SECRET');
+    if (!appSecret) {
+      console.error('WHATSAPP_APP_SECRET not configured');
+      // Still return 200 to prevent retries
+      return new Response(JSON.stringify({ status: 'ok' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    const signature = req.headers.get('X-Hub-Signature-256');
+    const isValidSignature = await verifyWebhookSignature(rawBody, signature, appSecret);
+    
+    if (!isValidSignature) {
+      console.error('Invalid webhook signature - rejecting request');
+      // Return 401 for invalid signature (Meta should not retry with same invalid sig)
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    
+    console.log('Webhook signature verified successfully');
+
+    // Parse JSON to validate it's proper payload
+    let body: any;
+    try {
+      body = JSON.parse(rawBody);
+    } catch (parseError) {
+      console.error('JSON parse error:', parseError);
+      return new Response(JSON.stringify({ status: 'ok' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    console.log('Received webhook body:', JSON.stringify(body, null, 2));
+
+    // Get environment variables
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    const openRouterApiKey = Deno.env.get('OPENROUTER_API_KEY');
+    const whatsappAccessToken = Deno.env.get('WHATSAPP_ACCESS_TOKEN');
+    const whatsappPhoneNumberId = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID');
+
+    if (!supabaseUrl || !supabaseKey || !openRouterApiKey || !whatsappAccessToken || !whatsappPhoneNumberId) {
+      console.error('Missing required environment variables');
+      return new Response(JSON.stringify({ status: 'ok' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // Use EdgeRuntime.waitUntil for background processing
+    // This allows us to return 200 immediately while processing continues
+    const backgroundTask = processMessage(
+      rawBody,
+      supabaseUrl,
+      supabaseKey,
+      openRouterApiKey,
+      whatsappAccessToken,
+      whatsappPhoneNumberId
+    );
+
+    // @ts-ignore - EdgeRuntime is available in Supabase Edge Functions
+    if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
+      // @ts-ignore
+      EdgeRuntime.waitUntil(backgroundTask);
+      console.log('Background task scheduled via EdgeRuntime.waitUntil');
+    } else {
+      // Fallback: just start the task but don't await it
+      backgroundTask.catch(err => console.error('Background task error:', err));
+      console.log('Background task started (no waitUntil available)');
+    }
+
+    // Return 200 OK immediately to Meta
+    console.log('Returning 200 OK to Meta immediately');
     return new Response(JSON.stringify({ status: 'ok' }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -329,11 +407,17 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('Webhook error:', error);
-    return new Response(JSON.stringify({ error: 'Internal error' }), {
-      status: 200, // Return 200 to prevent Meta from retrying
+    // Always return 200 to prevent Meta from retrying
+    return new Response(JSON.stringify({ status: 'ok' }), {
+      status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
+});
+
+// Shutdown handler for logging
+addEventListener('beforeunload', (ev: any) => {
+  console.log('Function shutdown:', ev.detail?.reason || 'unknown reason');
 });
 
 // Rule-based intent classification
