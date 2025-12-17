@@ -18,12 +18,21 @@ interface Message {
   model_used?: string;
 }
 
-// Model Registry using Lovable AI Gateway (google/gemini-2.5-flash default)
+const WHATSAPP_TEXT_LIMIT = 4096;
+
+function clampWhatsAppText(input: string, limit = WHATSAPP_TEXT_LIMIT): string {
+  const text = (input ?? '').toString();
+  if (text.length <= limit) return text;
+  const suffix = "\n\n…(trimmed)";
+  return text.slice(0, Math.max(0, limit - suffix.length)) + suffix;
+}
+
+// Model Registry using Lovable AI Gateway
 const MODEL_REGISTRY = {
-  general_chat: 'google/gemini-2.5-flash',
-  heavy_reasoning: 'google/gemini-2.5-pro',
-  web_search: 'google/gemini-2.5-flash',
-  planning: 'google/gemini-2.5-pro',
+  general_chat: 'google/gemini-2.5-flash-lite',
+  heavy_reasoning: 'google/gemini-2.5-flash',
+  web_search: 'google/gemini-2.5-flash-lite',
+  planning: 'google/gemini-2.5-flash',
   fallback: 'google/gemini-2.5-flash-lite'
 };
 
@@ -177,10 +186,19 @@ async function processMessage(
       .order('received_at', { ascending: false })
       .limit(20);
 
-    const conversationHistory = (history || []).reverse().map(msg => ({
-      role: msg.sender === 'user' ? 'user' : 'assistant',
-      content: msg.sender === 'user' ? msg.message_content : msg.ai_response,
-    }));
+    const conversationHistory = (history || [])
+      .reverse()
+      .map((m: any) => {
+        const role = m.sender === 'user' ? 'user' : 'assistant';
+        const content = m.sender === 'user'
+          ? m.message_content
+          : (m.ai_response ?? m.message_content ?? '');
+
+        return typeof content === 'string' && content.trim().length
+          ? { role, content }
+          : null;
+      })
+      .filter(Boolean);
 
     // Get assistant settings
     const { data: settings } = await supabase
@@ -191,8 +209,7 @@ async function processMessage(
     const systemPrompt = systemPromptSetting?.setting_value?.prompt || 
       'You are InfoNiblet, a friendly AI research assistant. Keep answers concise and include sources.';
     
-    const modelSetting = settings?.find(s => s.setting_key === 'openrouter_model');
-    const aiModel = modelSetting?.setting_value?.model || 'nvidia/nemotron-nano-12b-v2-vl:free';
+    // Model is selected dynamically based on intent (Lovable AI Gateway)
 
     // Classify intent
     const taskIntent = classifyTaskIntent(message_content, conversationHistory);
@@ -242,13 +259,15 @@ async function processMessage(
       toolCalls = executionResult.toolCalls;
     }
 
+    const outboundMessage = clampWhatsAppText(aiResponse);
+
     // Store AI response
     const { error: storeError } = await supabase.from('whatsapp_messages').insert({
       phone_number,
       sender: 'assistant',
       message_type: 'text',
-      message_content: aiResponse,
-      ai_response: aiResponse,
+      message_content: outboundMessage,
+      ai_response: outboundMessage,
       intent: taskIntent,
       tool_calls: toolCalls,
       model_used: selectedModel,
@@ -259,7 +278,12 @@ async function processMessage(
     }
 
     // Send response via Meta API
-    const sendResult = await sendWhatsAppMessage(whatsappPhoneNumberId, whatsappAccessToken, phone_number, aiResponse);
+    const sendResult = await sendWhatsAppMessage(
+      whatsappPhoneNumberId,
+      whatsappAccessToken,
+      phone_number,
+      outboundMessage
+    );
     console.log('WhatsApp send result:', JSON.stringify(sendResult));
     
     console.log('Background processing completed successfully');
@@ -468,56 +492,84 @@ async function executeWithLovableAI(
   history: any[],
   systemPrompt: string
 ): Promise<{ response: string; model: string; toolCalls?: any }> {
-  
   let selectedModel = MODEL_REGISTRY.general_chat;
   let specializedSystemPrompt = systemPrompt;
-  
+
+  // Keep responses short to reduce latency and avoid WhatsApp length limits
+  const brevity =
+    "\n\nImportant: Respond concisely (prefer <1200 characters) unless the user explicitly asks for more.";
+
   switch (intent) {
     case 'web_search':
       selectedModel = MODEL_REGISTRY.web_search;
-      specializedSystemPrompt = `${systemPrompt}\n\nProvide current, factual information. Be concise and helpful.`;
+      specializedSystemPrompt = `${systemPrompt}${brevity}\n\nProvide current, factual information. Be concise and helpful.`;
       break;
     case 'reasoning':
       selectedModel = MODEL_REGISTRY.heavy_reasoning;
-      specializedSystemPrompt = `${systemPrompt}\n\nThink step-by-step. Break down complex problems logically.`;
+      specializedSystemPrompt = `${systemPrompt}${brevity}\n\nExplain clearly and logically. Avoid unnecessary verbosity.`;
       break;
     case 'planning':
       selectedModel = MODEL_REGISTRY.planning;
-      specializedSystemPrompt = `${systemPrompt}\n\nCreate structured, detailed plans with clear steps.`;
+      specializedSystemPrompt = `${systemPrompt}${brevity}\n\nCreate a short, structured plan with clear steps.`;
       break;
     default:
       selectedModel = MODEL_REGISTRY.general_chat;
-      specializedSystemPrompt = `${systemPrompt}\n\nBe friendly, concise, and helpful.`;
+      specializedSystemPrompt = `${systemPrompt}${brevity}\n\nBe friendly, concise, and helpful.`;
       break;
   }
-  
+
   console.log(`Executing with Lovable AI - intent: ${intent}, model: ${selectedModel}`);
-  
-  const recentHistory = history.slice(-10);
+
+  const recentHistory = (history || []).slice(-10).filter((m: any) => m?.content);
   const messages = [
     { role: 'system', content: specializedSystemPrompt },
     ...recentHistory,
-    { role: 'user', content: message }
+    { role: 'user', content: message },
   ];
-  
+
+  const maxTokens = intent === 'planning' || intent === 'reasoning' ? 800 : 500;
+
+  const makeRequest = async (model: string, max_tokens: number) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
+    try {
+      return await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model,
+          messages,
+          max_tokens,
+          temperature: 0.4,
+        }),
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
+  const startedAt = Date.now();
+
   try {
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: selectedModel,
-        messages,
-      }),
-    });
+    let response = await makeRequest(selectedModel, maxTokens);
+
+    // One fast retry on transient overloads
+    if (!response.ok && (response.status === 429 || response.status === 503 || response.status === 504)) {
+      console.warn(`Lovable AI transient error (${response.status}). Retrying with fallback model.`);
+      await new Promise((r) => setTimeout(r, 400));
+      selectedModel = MODEL_REGISTRY.fallback;
+      response = await makeRequest(selectedModel, 400);
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error('Lovable AI error:', response.status, errorText);
-      
-      // Handle rate limits
+
       if (response.status === 429) {
         return { response: '⏱️ Service busy. Please try again shortly.', model: selectedModel };
       }
@@ -528,13 +580,25 @@ async function executeWithLovableAI(
     }
 
     const data = await response.json();
+    const text = data?.choices?.[0]?.message?.content;
+
+    const elapsedMs = Date.now() - startedAt;
+    console.log('Lovable AI completed', {
+      elapsedMs,
+      intent,
+      model: selectedModel,
+      chars: typeof text === 'string' ? text.length : 0,
+    });
+
     return {
-      response: data.choices?.[0]?.message?.content || 'Sorry, I could not generate a response.',
+      response: typeof text === 'string' && text.trim().length
+        ? text
+        : 'Sorry, I could not generate a response.',
       model: selectedModel,
     };
-    
   } catch (error) {
-    console.error('Lovable AI execution error:', error);
+    const elapsedMs = Date.now() - startedAt;
+    console.error('Lovable AI execution error:', { elapsedMs, error: String(error) });
     return { response: '❌ An error occurred.', model: selectedModel };
   }
 }
