@@ -18,13 +18,13 @@ interface Message {
   model_used?: string;
 }
 
-// Model Registry with specialized capabilities (using Google Gemini free model)
+// Model Registry using Lovable AI Gateway (google/gemini-2.5-flash default)
 const MODEL_REGISTRY = {
-  general_chat: 'google/gemini-2.0-flash-exp:free',
-  heavy_reasoning: 'google/gemini-2.0-flash-exp:free',
-  web_search: 'google/gemini-2.0-flash-exp:free',
-  planning: 'google/gemini-2.0-flash-exp:free',
-  fallback: 'google/gemini-2.0-flash-exp:free'
+  general_chat: 'google/gemini-2.5-flash',
+  heavy_reasoning: 'google/gemini-2.5-pro',
+  web_search: 'google/gemini-2.5-flash',
+  planning: 'google/gemini-2.5-pro',
+  fallback: 'google/gemini-2.5-flash-lite'
 };
 
 type TaskIntent = 'general_question' | 'web_search' | 'reasoning' | 'planning' | 'subscribe' | 'unsubscribe' | 'request_update';
@@ -113,7 +113,7 @@ async function processMessage(
   rawBody: string,
   supabaseUrl: string,
   supabaseKey: string,
-  openRouterApiKey: string,
+  lovableApiKey: string,
   whatsappAccessToken: string,
   whatsappPhoneNumberId: string
 ): Promise<void> {
@@ -229,9 +229,8 @@ async function processMessage(
       }
       selectedModel = 'system';
     } else {
-      const executionResult = await executeWithSpecializedModel(
-        openRouterApiKey,
-        supabaseUrl,
+      const executionResult = await executeWithLovableAI(
+        lovableApiKey,
         taskIntent,
         message_content,
         conversationHistory,
@@ -364,11 +363,11 @@ serve(async (req) => {
     // Get environment variables
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-    const openRouterApiKey = Deno.env.get('OPENROUTER_API_KEY');
+    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
     const whatsappAccessToken = Deno.env.get('WHATSAPP_ACCESS_TOKEN');
     const whatsappPhoneNumberId = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID');
 
-    if (!supabaseUrl || !supabaseKey || !openRouterApiKey || !whatsappAccessToken || !whatsappPhoneNumberId) {
+    if (!supabaseUrl || !supabaseKey || !lovableApiKey || !whatsappAccessToken || !whatsappPhoneNumberId) {
       console.error('Missing required environment variables');
       return new Response(JSON.stringify({ status: 'ok' }), {
         status: 200,
@@ -382,7 +381,7 @@ serve(async (req) => {
       rawBody,
       supabaseUrl,
       supabaseKey,
-      openRouterApiKey,
+      lovableApiKey,
       whatsappAccessToken,
       whatsappPhoneNumberId
     );
@@ -461,10 +460,9 @@ function classifyTaskIntent(message: string, history: any[]): TaskIntent {
   return 'general_question';
 }
 
-// Execute task with specialized model
-async function executeWithSpecializedModel(
+// Execute task with Lovable AI Gateway
+async function executeWithLovableAI(
   apiKey: string,
-  supabaseUrl: string,
   intent: TaskIntent,
   message: string,
   history: any[],
@@ -493,7 +491,7 @@ async function executeWithSpecializedModel(
       break;
   }
   
-  console.log(`Executing with ${intent} using model: ${selectedModel}`);
+  console.log(`Executing with Lovable AI - intent: ${intent}, model: ${selectedModel}`);
   
   const recentHistory = history.slice(-10);
   const messages = [
@@ -503,54 +501,28 @@ async function executeWithSpecializedModel(
   ];
   
   try {
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': supabaseUrl,
-        'X-Title': 'InfoNiblet Bot',
       },
       body: JSON.stringify({
         model: selectedModel,
         messages,
-        temperature: intent === 'reasoning' || intent === 'planning' ? 0.3 : 0.7,
       }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Model error:', response.status, errorText);
+      console.error('Lovable AI error:', response.status, errorText);
       
-      if (response.status === 429 && selectedModel !== MODEL_REGISTRY.fallback) {
-        console.log('Rate limited, trying fallback');
-        
-        const fallbackResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': supabaseUrl,
-            'X-Title': 'InfoNiblet Bot',
-          },
-          body: JSON.stringify({
-            model: MODEL_REGISTRY.fallback,
-            messages,
-            temperature: 0.7,
-          }),
-        });
-        
-        if (fallbackResponse.ok) {
-          const fallbackData = await fallbackResponse.json();
-          return {
-            response: fallbackData.choices?.[0]?.message?.content || 'Sorry, I could not generate a response.',
-            model: MODEL_REGISTRY.fallback,
-          };
-        }
-      }
-      
+      // Handle rate limits
       if (response.status === 429) {
         return { response: '⏱️ Service busy. Please try again shortly.', model: selectedModel };
+      }
+      if (response.status === 402) {
+        return { response: '⚠️ Service temporarily unavailable.', model: selectedModel };
       }
       return { response: '❌ Error occurred. Please try again.', model: selectedModel };
     }
@@ -562,7 +534,7 @@ async function executeWithSpecializedModel(
     };
     
   } catch (error) {
-    console.error('Execution error:', error);
+    console.error('Lovable AI execution error:', error);
     return { response: '❌ An error occurred.', model: selectedModel };
   }
 }
