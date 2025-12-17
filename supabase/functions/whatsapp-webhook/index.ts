@@ -18,13 +18,13 @@ interface Message {
   model_used?: string;
 }
 
-// Model Registry with specialized capabilities (using most reliable free models)
+// Model Registry with specialized capabilities (using Google Gemini free model)
 const MODEL_REGISTRY = {
-  general_chat: 'deepseek/deepseek-chat-v3-0324:free',
-  heavy_reasoning: 'deepseek/deepseek-r1:free',
-  web_search: 'deepseek/deepseek-chat-v3-0324:free',
-  planning: 'deepseek/deepseek-r1:free',
-  fallback: 'nvidia/nemotron-nano-12b-v2-vl:free'
+  general_chat: 'google/gemini-2.0-flash-exp:free',
+  heavy_reasoning: 'google/gemini-2.0-flash-exp:free',
+  web_search: 'google/gemini-2.0-flash-exp:free',
+  planning: 'google/gemini-2.0-flash-exp:free',
+  fallback: 'google/gemini-2.0-flash-exp:free'
 };
 
 type TaskIntent = 'general_question' | 'web_search' | 'reasoning' | 'planning' | 'subscribe' | 'unsubscribe' | 'request_update';
