@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Settings, Save, Copy, CheckCircle } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Loader2, Settings, Save, Copy, CheckCircle, Key, Bot } from "lucide-react";
 import { toast } from "sonner";
 
 interface Setting {
@@ -15,15 +16,69 @@ interface Setting {
   description?: string;
 }
 
+type AIProvider = 'lovable' | 'openrouter' | 'openai' | 'anthropic' | 'gemini';
+
+const AI_PROVIDERS: { id: AIProvider; name: string; requiresKey: boolean; models: string[] }[] = [
+  { 
+    id: 'lovable', 
+    name: 'Lovable AI (Free)', 
+    requiresKey: false,
+    models: [
+      'google/gemini-2.5-flash-lite',
+      'google/gemini-2.5-flash',
+      'google/gemini-2.5-pro',
+      'openai/gpt-5-nano',
+      'openai/gpt-5-mini',
+      'openai/gpt-5'
+    ]
+  },
+  { 
+    id: 'openrouter', 
+    name: 'OpenRouter', 
+    requiresKey: true,
+    models: [
+      'deepseek/deepseek-chat-v3-0324:free',
+      'nvidia/nemotron-nano-12b-v2-vl:free',
+      'google/gemini-2.0-flash-exp:free',
+      'anthropic/claude-3.5-sonnet',
+      'openai/gpt-4o',
+      'meta-llama/llama-3.3-70b-instruct'
+    ]
+  },
+  { 
+    id: 'openai', 
+    name: 'OpenAI', 
+    requiresKey: true,
+    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo']
+  },
+  { 
+    id: 'anthropic', 
+    name: 'Anthropic', 
+    requiresKey: true,
+    models: ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022', 'claude-3-opus-20240229']
+  },
+  { 
+    id: 'gemini', 
+    name: 'Google Gemini', 
+    requiresKey: true,
+    models: ['gemini-2.0-flash-exp', 'gemini-1.5-pro', 'gemini-1.5-flash']
+  },
+];
+
 export const SettingsView = () => {
   const [settings, setSettings] = useState<Setting[]>([]);
   const [loading, setLoading] = useState(true);
   const [systemPrompt, setSystemPrompt] = useState('');
   const [updateFrequency, setUpdateFrequency] = useState(6);
   const [maxImagesPerDay, setMaxImagesPerDay] = useState(10);
-  const [openRouterModel, setOpenRouterModel] = useState('nvidia/nemotron-nano-12b-v2-vl:free');
   const [phoneNumberId, setPhoneNumberId] = useState('');
   const [copied, setCopied] = useState(false);
+  
+  // AI Provider settings
+  const [aiProvider, setAiProvider] = useState<AIProvider>('lovable');
+  const [aiModel, setAiModel] = useState('google/gemini-2.5-flash-lite');
+  const [apiKey, setApiKey] = useState('');
+  const [apiKeySet, setApiKeySet] = useState(false);
 
   const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/whatsapp-webhook`;
 
@@ -59,17 +114,20 @@ export const SettingsView = () => {
         const val = imagesSetting.setting_value as Record<string, unknown>;
         if (val.limit) setMaxImagesPerDay(val.limit as number);
       }
-      
-      const modelSetting = data?.find(s => s.setting_key === 'openrouter_model');
-      if (modelSetting?.setting_value && typeof modelSetting.setting_value === 'object') {
-        const val = modelSetting.setting_value as Record<string, unknown>;
-        if (val.model) setOpenRouterModel(val.model as string);
-      }
 
       const phoneSetting = data?.find(s => s.setting_key === 'whatsapp_phone_number_id');
       if (phoneSetting?.setting_value && typeof phoneSetting.setting_value === 'object') {
         const val = phoneSetting.setting_value as Record<string, unknown>;
         if (val.phone_number_id) setPhoneNumberId(val.phone_number_id as string);
+      }
+
+      // Load AI provider settings
+      const providerSetting = data?.find(s => s.setting_key === 'ai_provider');
+      if (providerSetting?.setting_value && typeof providerSetting.setting_value === 'object') {
+        const val = providerSetting.setting_value as Record<string, unknown>;
+        if (val.provider) setAiProvider(val.provider as AIProvider);
+        if (val.model) setAiModel(val.model as string);
+        if (val.api_key_set) setApiKeySet(val.api_key_set as boolean);
       }
     }
     setLoading(false);
@@ -95,18 +153,36 @@ export const SettingsView = () => {
       await supabase
         .from('assistant_settings')
         .upsert({ 
-          setting_key: 'openrouter_model', 
-          setting_value: { model: openRouterModel },
-          description: 'OpenRouter AI model'
-        }, { onConflict: 'setting_key' });
-
-      await supabase
-        .from('assistant_settings')
-        .upsert({ 
           setting_key: 'whatsapp_phone_number_id', 
           setting_value: { phone_number_id: phoneNumberId },
           description: 'Meta WhatsApp Phone Number ID'
         }, { onConflict: 'setting_key' });
+
+      // Save AI provider settings
+      const providerConfig: any = {
+        provider: aiProvider,
+        model: aiModel,
+        api_key_set: apiKeySet || (apiKey.length > 0)
+      };
+      
+      // Only include API key if it's being set/updated
+      if (apiKey.length > 0) {
+        providerConfig.api_key = apiKey;
+        providerConfig.api_key_set = true;
+      }
+
+      await supabase
+        .from('assistant_settings')
+        .upsert({ 
+          setting_key: 'ai_provider', 
+          setting_value: providerConfig,
+          description: 'AI Provider Configuration'
+        }, { onConflict: 'setting_key' });
+
+      if (apiKey.length > 0) {
+        setApiKey(''); // Clear the input after saving
+        setApiKeySet(true);
+      }
 
       toast.success('Settings saved successfully');
     } catch (error) {
@@ -122,6 +198,18 @@ export const SettingsView = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleProviderChange = (provider: AIProvider) => {
+    setAiProvider(provider);
+    const providerConfig = AI_PROVIDERS.find(p => p.id === provider);
+    if (providerConfig && providerConfig.models.length > 0) {
+      setAiModel(providerConfig.models[0]);
+    }
+    setApiKey('');
+    setApiKeySet(false);
+  };
+
+  const currentProvider = AI_PROVIDERS.find(p => p.id === aiProvider);
+
   if (loading) {
     return (
       <Card className="border-border/50 shadow-md bg-card/50 backdrop-blur-sm">
@@ -134,6 +222,83 @@ export const SettingsView = () => {
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
+      {/* AI Provider Configuration */}
+      <Card className="border-border/50 shadow-md bg-card/50 backdrop-blur-sm">
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Bot className="w-5 h-5 text-primary" />
+            AI Provider
+          </CardTitle>
+          <CardDescription>Choose your preferred AI provider and model</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>Provider</Label>
+            <Select value={aiProvider} onValueChange={(v) => handleProviderChange(v as AIProvider)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {AI_PROVIDERS.map(provider => (
+                  <SelectItem key={provider.id} value={provider.id}>
+                    {provider.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Model</Label>
+            <Select value={aiModel} onValueChange={setAiModel}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {currentProvider?.models.map(model => (
+                  <SelectItem key={model} value={model}>
+                    {model}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {currentProvider?.requiresKey && (
+            <div className="space-y-2">
+              <Label htmlFor="api-key" className="flex items-center gap-2">
+                <Key className="w-4 h-4" />
+                API Key
+                {apiKeySet && (
+                  <span className="text-xs text-green-500 flex items-center gap-1">
+                    <CheckCircle className="w-3 h-3" /> Configured
+                  </span>
+                )}
+              </Label>
+              <Input
+                id="api-key"
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder={apiKeySet ? '••••••••••••••••' : `Enter your ${currentProvider.name} API key`}
+              />
+              <p className="text-xs text-muted-foreground">
+                {aiProvider === 'openrouter' && 'Get your API key from openrouter.ai'}
+                {aiProvider === 'openai' && 'Get your API key from platform.openai.com'}
+                {aiProvider === 'anthropic' && 'Get your API key from console.anthropic.com'}
+                {aiProvider === 'gemini' && 'Get your API key from aistudio.google.com'}
+              </p>
+            </div>
+          )}
+
+          {aiProvider === 'lovable' && (
+            <div className="bg-primary/10 text-primary text-sm p-3 rounded-lg">
+              Lovable AI is free and requires no API key. It provides access to Google Gemini and OpenAI models.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <Card className="border-border/50 shadow-md bg-card/50 backdrop-blur-sm">
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
@@ -175,17 +340,6 @@ export const SettingsView = () => {
               max="100"
               value={maxImagesPerDay}
               onChange={(e) => setMaxImagesPerDay(parseInt(e.target.value) || 10)}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="openrouter-model">OpenRouter AI Model</Label>
-            <Input
-              id="openrouter-model"
-              type="text"
-              value={openRouterModel}
-              onChange={(e) => setOpenRouterModel(e.target.value)}
-              placeholder="e.g., deepseek/deepseek-chat-v3-0324:free"
             />
           </div>
 

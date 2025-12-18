@@ -21,6 +21,15 @@ interface Message {
   processing_status?: string;
 }
 
+type AIProvider = 'lovable' | 'openrouter' | 'openai' | 'anthropic' | 'gemini';
+
+interface ProviderConfig {
+  provider: AIProvider;
+  model: string;
+  api_key?: string;
+  api_key_set?: boolean;
+}
+
 const WHATSAPP_TEXT_LIMIT = 4096;
 
 function splitWhatsAppMessage(text: string, limit = WHATSAPP_TEXT_LIMIT): string[] {
@@ -36,16 +45,13 @@ function splitWhatsAppMessage(text: string, limit = WHATSAPP_TEXT_LIMIT): string
       break;
     }
     
-    // Find a good split point (prefer paragraph, sentence, or word boundary)
-    let splitAt = limit - 20; // Leave room for part indicator
+    let splitAt = limit - 20;
     const chunk = remaining.slice(0, limit - 20);
     
-    // Try to split at paragraph
     const paraBreak = chunk.lastIndexOf('\n\n');
     if (paraBreak > limit / 2) {
       splitAt = paraBreak;
     } else {
-      // Try sentence
       const sentenceBreak = Math.max(
         chunk.lastIndexOf('. '),
         chunk.lastIndexOf('! '),
@@ -54,7 +60,6 @@ function splitWhatsAppMessage(text: string, limit = WHATSAPP_TEXT_LIMIT): string
       if (sentenceBreak > limit / 2) {
         splitAt = sentenceBreak + 1;
       } else {
-        // Try word boundary
         const wordBreak = chunk.lastIndexOf(' ');
         if (wordBreak > limit / 2) {
           splitAt = wordBreak;
@@ -67,18 +72,17 @@ function splitWhatsAppMessage(text: string, limit = WHATSAPP_TEXT_LIMIT): string
     partNum++;
   }
   
-  // Update part counts
   const total = parts.length;
   return parts.map((p, i) => p.replace('(...)', `(${total})`));
 }
 
-// Model Registry using Lovable AI Gateway
-const MODEL_REGISTRY = {
-  general_chat: 'google/gemini-2.5-flash-lite',
-  heavy_reasoning: 'google/gemini-2.5-flash',
-  web_search: 'google/gemini-2.5-flash-lite',
-  planning: 'google/gemini-2.5-flash',
-  fallback: 'google/gemini-2.5-flash-lite'
+// Provider API endpoints and configurations
+const PROVIDER_ENDPOINTS: Record<AIProvider, string> = {
+  lovable: 'https://ai.gateway.lovable.dev/v1/chat/completions',
+  openrouter: 'https://openrouter.ai/api/v1/chat/completions',
+  openai: 'https://api.openai.com/v1/chat/completions',
+  anthropic: 'https://api.anthropic.com/v1/messages',
+  gemini: 'https://generativelanguage.googleapis.com/v1beta/models',
 };
 
 type TaskIntent = 'general_question' | 'web_search' | 'reasoning' | 'planning' | 'subscribe' | 'unsubscribe' | 'request_update';
@@ -168,6 +172,194 @@ async function updateProcessingStatus(supabase: any, messageId: string, status: 
     .eq('message_id', messageId);
 }
 
+// Get provider configuration from settings
+async function getProviderConfig(supabase: any): Promise<ProviderConfig> {
+  const { data } = await supabase
+    .from('assistant_settings')
+    .select('setting_value')
+    .eq('setting_key', 'ai_provider')
+    .single();
+  
+  if (data?.setting_value) {
+    return {
+      provider: data.setting_value.provider || 'lovable',
+      model: data.setting_value.model || 'google/gemini-2.5-flash-lite',
+      api_key: data.setting_value.api_key,
+      api_key_set: data.setting_value.api_key_set
+    };
+  }
+  
+  return { provider: 'lovable', model: 'google/gemini-2.5-flash-lite' };
+}
+
+// Execute AI request based on provider
+async function executeAIRequest(
+  providerConfig: ProviderConfig,
+  lovableApiKey: string,
+  messages: any[],
+  maxTokens: number
+): Promise<{ response: string; model: string }> {
+  const { provider, model, api_key } = providerConfig;
+  
+  console.log(`Executing AI request - provider: ${provider}, model: ${model}`);
+  
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+  
+  try {
+    let response: Response;
+    let apiKey = provider === 'lovable' ? lovableApiKey : api_key;
+    
+    if (!apiKey && provider !== 'lovable') {
+      console.error(`No API key configured for provider: ${provider}`);
+      return { response: '⚠️ API key not configured. Please add your API key in Settings.', model };
+    }
+    
+    if (provider === 'anthropic') {
+      // Anthropic has different API format
+      const systemMsg = messages.find(m => m.role === 'system');
+      const otherMsgs = messages.filter(m => m.role !== 'system');
+      
+      response = await fetch(PROVIDER_ENDPOINTS.anthropic, {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey!,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model,
+          max_tokens: maxTokens,
+          system: systemMsg?.content || '',
+          messages: otherMsgs.map(m => ({ role: m.role, content: m.content })),
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Anthropic API error:', response.status, errorText);
+        throw new Error(`Anthropic API error: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      return {
+        response: data.content?.[0]?.text || 'No response generated.',
+        model
+      };
+      
+    } else if (provider === 'gemini') {
+      // Gemini API format
+      const contents = messages
+        .filter(m => m.role !== 'system')
+        .map(m => ({
+          role: m.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: m.content }]
+        }));
+      
+      const systemInstruction = messages.find(m => m.role === 'system')?.content;
+      
+      response = await fetch(`${PROVIDER_ENDPOINTS.gemini}/${model}:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents,
+          systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
+          generationConfig: { maxOutputTokens: maxTokens, temperature: 0.4 }
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Gemini API error:', response.status, errorText);
+        throw new Error(`Gemini API error: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      return {
+        response: data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated.',
+        model
+      };
+      
+    } else {
+      // OpenAI-compatible format (Lovable, OpenRouter, OpenAI)
+      const endpoint = PROVIDER_ENDPOINTS[provider];
+      const headers: Record<string, string> = {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      };
+      
+      // OpenRouter needs additional headers
+      if (provider === 'openrouter') {
+        headers['HTTP-Referer'] = 'https://lovable.dev';
+        headers['X-Title'] = 'InfoNiblet';
+      }
+      
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        signal: controller.signal,
+        body: JSON.stringify({
+          model,
+          messages,
+          max_tokens: maxTokens,
+          temperature: 0.4,
+        }),
+      });
+      
+      // Handle transient errors with retry
+      if (!response.ok && (response.status === 429 || response.status === 503 || response.status === 504)) {
+        console.warn(`Transient error (${response.status}), retrying...`);
+        await new Promise(r => setTimeout(r, 500));
+        
+        response = await fetch(endpoint, {
+          method: 'POST',
+          headers,
+          signal: controller.signal,
+          body: JSON.stringify({
+            model,
+            messages,
+            max_tokens: Math.min(maxTokens, 400),
+            temperature: 0.4,
+          }),
+        });
+      }
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`${provider} API error:`, response.status, errorText);
+        
+        if (response.status === 429) {
+          return { response: '⏱️ Rate limit reached. Please try again shortly.', model };
+        }
+        if (response.status === 402) {
+          return { response: '⚠️ API credits exhausted. Please check your account.', model };
+        }
+        if (response.status === 401) {
+          return { response: '⚠️ Invalid API key. Please check your settings.', model };
+        }
+        throw new Error(`${provider} API error: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      return {
+        response: data.choices?.[0]?.message?.content || 'No response generated.',
+        model
+      };
+    }
+    
+  } catch (error) {
+    console.error('AI execution error:', String(error));
+    if (String(error).includes('abort')) {
+      return { response: '⏱️ Request timed out. Please try again.', model };
+    }
+    return { response: '❌ An error occurred. Please try again.', model };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 // Background processing function
 async function processMessage(
   rawBody: string,
@@ -236,7 +428,6 @@ async function processMessage(
 
     if (insertError) {
       console.error('Error inserting message:', insertError);
-      // If insert fails due to duplicate, skip
       if (insertError.code === '23505') {
         console.log('Duplicate insert detected, skipping');
         return;
@@ -273,6 +464,10 @@ async function processMessage(
     const systemPrompt = systemPromptSetting?.setting_value?.prompt || 
       'You are InfoNiblet, a friendly AI research assistant. Keep answers concise and include sources.';
 
+    // Get provider configuration
+    const providerConfig = await getProviderConfig(supabase);
+    console.log('Using provider:', providerConfig.provider, 'model:', providerConfig.model);
+
     // Classify intent
     const taskIntent = classifyTaskIntent(message_content, conversationHistory);
     console.log('Classified intent:', taskIntent);
@@ -280,7 +475,7 @@ async function processMessage(
     // Handle different intents
     let aiResponse = '';
     let toolCalls: any = null;
-    let selectedModel = '';
+    let selectedModel = providerConfig.model;
     let aiLatencyMs = 0;
 
     if (taskIntent === 'subscribe') {
@@ -310,22 +505,43 @@ async function processMessage(
       selectedModel = 'system';
     } else {
       const aiStart = Date.now();
-      const executionResult = await executeWithLovableAI(
-        lovableApiKey,
-        taskIntent,
-        message_content,
-        conversationHistory,
-        systemPrompt
-      );
+      
+      const brevity = "\n\nImportant: Respond concisely (prefer <1200 characters) unless asked for more.";
+      let specializedPrompt = systemPrompt + brevity;
+      
+      switch (taskIntent) {
+        case 'web_search':
+          specializedPrompt += '\n\nProvide current, factual information. Be concise.';
+          break;
+        case 'reasoning':
+          specializedPrompt += '\n\nExplain clearly and logically.';
+          break;
+        case 'planning':
+          specializedPrompt += '\n\nCreate a short, structured plan.';
+          break;
+        default:
+          specializedPrompt += '\n\nBe friendly and helpful.';
+          break;
+      }
+      
+      const recentHistory = (conversationHistory || []).slice(-10).filter((m: any) => m?.content);
+      const aiMessages = [
+        { role: 'system', content: specializedPrompt },
+        ...recentHistory,
+        { role: 'user', content: message_content },
+      ];
+      
+      const maxTokens = taskIntent === 'planning' || taskIntent === 'reasoning' ? 800 : 500;
+      
+      const result = await executeAIRequest(providerConfig, lovableApiKey, aiMessages, maxTokens);
       aiLatencyMs = Date.now() - aiStart;
       
-      aiResponse = executionResult.response;
-      selectedModel = executionResult.model;
-      toolCalls = executionResult.toolCalls;
+      aiResponse = result.response;
+      selectedModel = `${providerConfig.provider}/${result.model}`;
     }
 
     const totalLatencyMs = Date.now() - totalStart;
-    console.log('Latency metrics:', { aiLatencyMs, totalLatencyMs });
+    console.log('Latency metrics:', { aiLatencyMs, totalLatencyMs, provider: providerConfig.provider });
 
     // Split long messages into parts
     const messageParts = splitWhatsAppMessage(aiResponse);
@@ -363,7 +579,6 @@ async function processMessage(
       );
       console.log(`WhatsApp send result (part ${i + 1}/${messageParts.length}):`, sendResult?.messages?.[0]?.id || 'error');
       
-      // Small delay between multi-part messages
       if (i < messageParts.length - 1) {
         await new Promise(r => setTimeout(r, 300));
       }
@@ -534,112 +749,6 @@ function classifyTaskIntent(message: string, history: any[]): TaskIntent {
   }
   
   return 'general_question';
-}
-
-// Execute task with Lovable AI Gateway
-async function executeWithLovableAI(
-  apiKey: string,
-  intent: TaskIntent,
-  message: string,
-  history: any[],
-  systemPrompt: string
-): Promise<{ response: string; model: string; toolCalls?: any }> {
-  let selectedModel = MODEL_REGISTRY.general_chat;
-  let specializedSystemPrompt = systemPrompt;
-
-  const brevity = "\n\nImportant: Respond concisely (prefer <1200 characters) unless asked for more.";
-
-  switch (intent) {
-    case 'web_search':
-      selectedModel = MODEL_REGISTRY.web_search;
-      specializedSystemPrompt = `${systemPrompt}${brevity}\n\nProvide current, factual information. Be concise.`;
-      break;
-    case 'reasoning':
-      selectedModel = MODEL_REGISTRY.heavy_reasoning;
-      specializedSystemPrompt = `${systemPrompt}${brevity}\n\nExplain clearly and logically.`;
-      break;
-    case 'planning':
-      selectedModel = MODEL_REGISTRY.planning;
-      specializedSystemPrompt = `${systemPrompt}${brevity}\n\nCreate a short, structured plan.`;
-      break;
-    default:
-      selectedModel = MODEL_REGISTRY.general_chat;
-      specializedSystemPrompt = `${systemPrompt}${brevity}\n\nBe friendly and helpful.`;
-      break;
-  }
-
-  console.log(`Executing with Lovable AI - intent: ${intent}, model: ${selectedModel}`);
-
-  const recentHistory = (history || []).slice(-10).filter((m: any) => m?.content);
-  const messages = [
-    { role: 'system', content: specializedSystemPrompt },
-    ...recentHistory,
-    { role: 'user', content: message },
-  ];
-
-  const maxTokens = intent === 'planning' || intent === 'reasoning' ? 800 : 500;
-
-  const makeRequest = async (model: string, max_tokens: number) => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-
-    try {
-      return await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model,
-          messages,
-          max_tokens,
-          temperature: 0.4,
-        }),
-      });
-    } finally {
-      clearTimeout(timeout);
-    }
-  };
-
-  try {
-    let response = await makeRequest(selectedModel, maxTokens);
-
-    // Retry on transient errors
-    if (!response.ok && (response.status === 429 || response.status === 503 || response.status === 504)) {
-      console.warn(`Transient error (${response.status}), retrying with fallback`);
-      await new Promise((r) => setTimeout(r, 400));
-      selectedModel = MODEL_REGISTRY.fallback;
-      response = await makeRequest(selectedModel, 400);
-    }
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Lovable AI error:', response.status, errorText);
-
-      if (response.status === 429) {
-        return { response: '⏱️ Service busy. Please try again shortly.', model: selectedModel };
-      }
-      if (response.status === 402) {
-        return { response: '⚠️ Service temporarily unavailable.', model: selectedModel };
-      }
-      return { response: '❌ Error occurred. Please try again.', model: selectedModel };
-    }
-
-    const data = await response.json();
-    const text = data?.choices?.[0]?.message?.content;
-
-    return {
-      response: typeof text === 'string' && text.trim().length
-        ? text
-        : 'Sorry, I could not generate a response.',
-      model: selectedModel,
-    };
-  } catch (error) {
-    console.error('Lovable AI execution error:', String(error));
-    return { response: '❌ An error occurred.', model: selectedModel };
-  }
 }
 
 async function handleSubscription(supabase: any, phone: string, action: 'subscribe' | 'unsubscribe') {
