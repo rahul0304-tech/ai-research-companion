@@ -136,6 +136,7 @@ export type Database = {
       }
       whatsapp_messages: {
         Row: {
+          ai_latency_ms: number | null
           ai_response: string | null
           created_at: string
           id: string
@@ -145,12 +146,15 @@ export type Database = {
           message_type: string
           model_used: string | null
           phone_number: string
+          processing_status: string | null
           received_at: string
           sender: string
           tool_calls: Json | null
+          total_latency_ms: number | null
           updated_at: string
         }
         Insert: {
+          ai_latency_ms?: number | null
           ai_response?: string | null
           created_at?: string
           id?: string
@@ -160,12 +164,15 @@ export type Database = {
           message_type?: string
           model_used?: string | null
           phone_number: string
+          processing_status?: string | null
           received_at?: string
           sender: string
           tool_calls?: Json | null
+          total_latency_ms?: number | null
           updated_at?: string
         }
         Update: {
+          ai_latency_ms?: number | null
           ai_response?: string | null
           created_at?: string
           id?: string
@@ -175,9 +182,11 @@ export type Database = {
           message_type?: string
           model_used?: string | null
           phone_number?: string
+          processing_status?: string | null
           received_at?: string
           sender?: string
           tool_calls?: Json | null
+          total_latency_ms?: number | null
           updated_at?: string
         }
         Relationships: []
