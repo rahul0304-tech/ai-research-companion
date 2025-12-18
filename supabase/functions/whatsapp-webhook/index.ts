@@ -16,15 +16,60 @@ interface Message {
   tool_calls?: any;
   ai_response?: string;
   model_used?: string;
+  ai_latency_ms?: number;
+  total_latency_ms?: number;
+  processing_status?: string;
 }
 
 const WHATSAPP_TEXT_LIMIT = 4096;
 
-function clampWhatsAppText(input: string, limit = WHATSAPP_TEXT_LIMIT): string {
-  const text = (input ?? '').toString();
-  if (text.length <= limit) return text;
-  const suffix = "\n\n…(trimmed)";
-  return text.slice(0, Math.max(0, limit - suffix.length)) + suffix;
+function splitWhatsAppMessage(text: string, limit = WHATSAPP_TEXT_LIMIT): string[] {
+  if (!text || text.length <= limit) return [text];
+  
+  const parts: string[] = [];
+  let remaining = text;
+  let partNum = 1;
+  
+  while (remaining.length > 0) {
+    if (remaining.length <= limit) {
+      parts.push(remaining);
+      break;
+    }
+    
+    // Find a good split point (prefer paragraph, sentence, or word boundary)
+    let splitAt = limit - 20; // Leave room for part indicator
+    const chunk = remaining.slice(0, limit - 20);
+    
+    // Try to split at paragraph
+    const paraBreak = chunk.lastIndexOf('\n\n');
+    if (paraBreak > limit / 2) {
+      splitAt = paraBreak;
+    } else {
+      // Try sentence
+      const sentenceBreak = Math.max(
+        chunk.lastIndexOf('. '),
+        chunk.lastIndexOf('! '),
+        chunk.lastIndexOf('? ')
+      );
+      if (sentenceBreak > limit / 2) {
+        splitAt = sentenceBreak + 1;
+      } else {
+        // Try word boundary
+        const wordBreak = chunk.lastIndexOf(' ');
+        if (wordBreak > limit / 2) {
+          splitAt = wordBreak;
+        }
+      }
+    }
+    
+    parts.push(remaining.slice(0, splitAt).trim() + `\n\n(${partNum}/...)`);
+    remaining = remaining.slice(splitAt).trim();
+    partNum++;
+  }
+  
+  // Update part counts
+  const total = parts.length;
+  return parts.map((p, i) => p.replace('(...)', `(${total})`));
 }
 
 // Model Registry using Lovable AI Gateway
@@ -44,16 +89,10 @@ async function verifyWebhookSignature(
   signature: string | null,
   appSecret: string
 ): Promise<boolean> {
-  if (!signature) {
-    console.log('No signature provided');
-    return false;
-  }
+  if (!signature) return false;
   
   const signatureHash = signature.split('sha256=')[1];
-  if (!signatureHash) {
-    console.log('Invalid signature format');
-    return false;
-  }
+  if (!signatureHash) return false;
 
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
@@ -64,25 +103,17 @@ async function verifyWebhookSignature(
     ['sign']
   );
 
-  const signatureBytes = await crypto.subtle.sign(
-    'HMAC',
-    key,
-    encoder.encode(payload)
-  );
-
+  const signatureBytes = await crypto.subtle.sign('HMAC', key, encoder.encode(payload));
   const computedHash = Array.from(new Uint8Array(signatureBytes))
     .map(b => b.toString(16).padStart(2, '0'))
     .join('');
 
-  const isValid = computedHash === signatureHash;
-  console.log('Signature verification:', { isValid, computedHash: computedHash.substring(0, 10) + '...', receivedHash: signatureHash.substring(0, 10) + '...' });
-  
-  return isValid;
+  return computedHash === signatureHash;
 }
 
 // Send message via Meta WhatsApp API v21.0
 async function sendWhatsAppMessage(phoneNumberId: string, accessToken: string, to: string, message: string): Promise<any> {
-  console.log('Sending WhatsApp message via Meta API:', { phoneNumberId, to, messageLength: message.length });
+  console.log('Sending WhatsApp message:', { to, messageLength: message.length });
   
   try {
     const response = await fetch(
@@ -104,17 +135,37 @@ async function sendWhatsAppMessage(phoneNumberId: string, accessToken: string, t
     );
     
     const result = await response.json();
-    console.log('Meta API response:', JSON.stringify(result));
-    
     if (!response.ok) {
-      console.error('Meta API error - Status:', response.status, 'Response:', JSON.stringify(result));
+      console.error('Meta API error:', response.status, JSON.stringify(result));
     }
-    
     return result;
   } catch (error) {
     console.error('sendWhatsAppMessage error:', error);
     return { error: String(error) };
   }
+}
+
+// Check for duplicate message
+async function isDuplicateMessage(supabase: any, messageId: string): Promise<boolean> {
+  if (!messageId) return false;
+  
+  const { data } = await supabase
+    .from('whatsapp_messages')
+    .select('id')
+    .eq('message_id', messageId)
+    .limit(1);
+  
+  return data && data.length > 0;
+}
+
+// Update message processing status
+async function updateProcessingStatus(supabase: any, messageId: string, status: string): Promise<void> {
+  if (!messageId) return;
+  
+  await supabase
+    .from('whatsapp_messages')
+    .update({ processing_status: status })
+    .eq('message_id', messageId);
 }
 
 // Background processing function
@@ -126,6 +177,8 @@ async function processMessage(
   whatsappAccessToken: string,
   whatsappPhoneNumberId: string
 ): Promise<void> {
+  const totalStart = Date.now();
+  
   try {
     console.log('Starting background message processing');
     
@@ -154,20 +207,27 @@ async function processMessage(
     const message_content = msg.text?.body || msg.caption || '';
     const message_id = msg.id;
 
-    console.log('Parsed message:', { phone_number, message_content, message_id });
+    console.log('Parsed message:', { phone_number, message_id });
 
     if (!phone_number || !message_content) {
-      console.error('Missing required data - phone_number or message_content');
+      console.error('Missing required data');
       return;
     }
 
-    // Store incoming message
+    // De-duplication check
+    if (await isDuplicateMessage(supabase, message_id)) {
+      console.log('Duplicate message detected, skipping:', message_id);
+      return;
+    }
+
+    // Store incoming message with processing status
     const userMessage: Message = {
       phone_number,
       sender: 'user',
       message_type: 'text',
       message_content,
       message_id,
+      processing_status: 'processing',
     };
 
     const { error: insertError } = await supabase
@@ -176,6 +236,11 @@ async function processMessage(
 
     if (insertError) {
       console.error('Error inserting message:', insertError);
+      // If insert fails due to duplicate, skip
+      if (insertError.code === '23505') {
+        console.log('Duplicate insert detected, skipping');
+        return;
+      }
     }
 
     // Get conversation history (last 20 messages)
@@ -193,7 +258,6 @@ async function processMessage(
         const content = m.sender === 'user'
           ? m.message_content
           : (m.ai_response ?? m.message_content ?? '');
-
         return typeof content === 'string' && content.trim().length
           ? { role, content }
           : null;
@@ -205,20 +269,19 @@ async function processMessage(
       .from('assistant_settings')
       .select('*');
 
-    const systemPromptSetting = settings?.find(s => s.setting_key === 'system_prompt');
+    const systemPromptSetting = settings?.find((s: any) => s.setting_key === 'system_prompt');
     const systemPrompt = systemPromptSetting?.setting_value?.prompt || 
       'You are InfoNiblet, a friendly AI research assistant. Keep answers concise and include sources.';
-    
-    // Model is selected dynamically based on intent (Lovable AI Gateway)
 
     // Classify intent
     const taskIntent = classifyTaskIntent(message_content, conversationHistory);
-    console.log('Classified task intent:', taskIntent);
+    console.log('Classified intent:', taskIntent);
 
     // Handle different intents
     let aiResponse = '';
     let toolCalls: any = null;
     let selectedModel = '';
+    let aiLatencyMs = 0;
 
     if (taskIntent === 'subscribe') {
       const result = await handleSubscription(supabase, phone_number, 'subscribe');
@@ -246,6 +309,7 @@ async function processMessage(
       }
       selectedModel = 'system';
     } else {
+      const aiStart = Date.now();
       const executionResult = await executeWithLovableAI(
         lovableApiKey,
         taskIntent,
@@ -253,53 +317,66 @@ async function processMessage(
         conversationHistory,
         systemPrompt
       );
+      aiLatencyMs = Date.now() - aiStart;
       
       aiResponse = executionResult.response;
       selectedModel = executionResult.model;
       toolCalls = executionResult.toolCalls;
     }
 
-    const outboundMessage = clampWhatsAppText(aiResponse);
+    const totalLatencyMs = Date.now() - totalStart;
+    console.log('Latency metrics:', { aiLatencyMs, totalLatencyMs });
 
-    // Store AI response
+    // Split long messages into parts
+    const messageParts = splitWhatsAppMessage(aiResponse);
+    console.log('Message parts:', messageParts.length);
+
+    // Update user message status to completed
+    await updateProcessingStatus(supabase, message_id, 'completed');
+
+    // Store AI response with latency metrics
     const { error: storeError } = await supabase.from('whatsapp_messages').insert({
       phone_number,
       sender: 'assistant',
       message_type: 'text',
-      message_content: outboundMessage,
-      ai_response: outboundMessage,
+      message_content: aiResponse,
+      ai_response: aiResponse,
       intent: taskIntent,
       tool_calls: toolCalls,
       model_used: selectedModel,
+      ai_latency_ms: aiLatencyMs,
+      total_latency_ms: totalLatencyMs,
+      processing_status: 'sent',
     });
 
     if (storeError) {
       console.error('Error storing AI response:', storeError);
     }
 
-    // Send response via Meta API
-    const sendResult = await sendWhatsAppMessage(
-      whatsappPhoneNumberId,
-      whatsappAccessToken,
-      phone_number,
-      outboundMessage
-    );
-    console.log('WhatsApp send result:', JSON.stringify(sendResult));
+    // Send all message parts
+    for (let i = 0; i < messageParts.length; i++) {
+      const sendResult = await sendWhatsAppMessage(
+        whatsappPhoneNumberId,
+        whatsappAccessToken,
+        phone_number,
+        messageParts[i]
+      );
+      console.log(`WhatsApp send result (part ${i + 1}/${messageParts.length}):`, sendResult?.messages?.[0]?.id || 'error');
+      
+      // Small delay between multi-part messages
+      if (i < messageParts.length - 1) {
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
     
-    console.log('Background processing completed successfully');
+    console.log('Background processing completed');
 
   } catch (error) {
     console.error('Background processing error:', error);
-    // Don't throw - we've already returned 200 to Meta
   }
 }
 
 serve(async (req) => {
-  console.log('Webhook called:', {
-    method: req.method,
-    url: req.url,
-  });
-
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -312,17 +389,13 @@ serve(async (req) => {
       const mode = url.searchParams.get('hub.mode');
       const token = url.searchParams.get('hub.verify_token');
       const challenge = url.searchParams.get('hub.challenge');
-      
       const verifyToken = Deno.env.get('WHATSAPP_VERIFY_TOKEN');
-      
-      console.log('Webhook verification attempt:', { mode, token, challenge, expectedToken: verifyToken });
       
       if (mode === 'subscribe' && token === verifyToken) {
         console.log('Webhook verified successfully');
         return new Response(challenge, { status: 200, headers: corsHeaders });
       }
       
-      console.log('Webhook verification failed');
       return new Response('Forbidden', { status: 403, headers: corsHeaders });
     } catch (error) {
       console.error('GET verification error:', error);
@@ -332,24 +405,20 @@ serve(async (req) => {
 
   // Only process POST requests for messages
   if (req.method !== 'POST') {
-    console.log('Unsupported method:', req.method);
     return new Response(
       JSON.stringify({ status: 'ok' }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
 
-  // Main POST handler - wrapped in try/catch, always return 200
+  // Main POST handler
   try {
-    // Read body first
     const rawBody = await req.text();
-    console.log('Received raw body length:', rawBody.length);
 
     // Verify webhook signature
     const appSecret = Deno.env.get('WHATSAPP_APP_SECRET');
     if (!appSecret) {
       console.error('WHATSAPP_APP_SECRET not configured');
-      // Still return 200 to prevent retries
       return new Response(JSON.stringify({ status: 'ok' }), {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -360,29 +429,23 @@ serve(async (req) => {
     const isValidSignature = await verifyWebhookSignature(rawBody, signature, appSecret);
     
     if (!isValidSignature) {
-      console.error('Invalid webhook signature - rejecting request');
-      // Return 401 for invalid signature (Meta should not retry with same invalid sig)
+      console.error('Invalid webhook signature');
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
-    
-    console.log('Webhook signature verified successfully');
 
-    // Parse JSON to validate it's proper payload
+    // Parse JSON
     let body: any;
     try {
       body = JSON.parse(rawBody);
     } catch (parseError) {
-      console.error('JSON parse error:', parseError);
       return new Response(JSON.stringify({ status: 'ok' }), {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
-
-    console.log('Received webhook body:', JSON.stringify(body, null, 2));
 
     // Get environment variables
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
@@ -399,8 +462,7 @@ serve(async (req) => {
       });
     }
 
-    // Use EdgeRuntime.waitUntil for background processing
-    // This allows us to return 200 immediately while processing continues
+    // Background processing
     const backgroundTask = processMessage(
       rawBody,
       supabaseUrl,
@@ -410,19 +472,15 @@ serve(async (req) => {
       whatsappPhoneNumberId
     );
 
-    // @ts-ignore - EdgeRuntime is available in Supabase Edge Functions
+    // @ts-ignore
     if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
       // @ts-ignore
       EdgeRuntime.waitUntil(backgroundTask);
-      console.log('Background task scheduled via EdgeRuntime.waitUntil');
     } else {
-      // Fallback: just start the task but don't await it
       backgroundTask.catch(err => console.error('Background task error:', err));
-      console.log('Background task started (no waitUntil available)');
     }
 
-    // Return 200 OK immediately to Meta
-    console.log('Returning 200 OK to Meta immediately');
+    // Return 200 OK immediately
     return new Response(JSON.stringify({ status: 'ok' }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -430,17 +488,11 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('Webhook error:', error);
-    // Always return 200 to prevent Meta from retrying
     return new Response(JSON.stringify({ status: 'ok' }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
-});
-
-// Shutdown handler for logging
-addEventListener('beforeunload', (ev: any) => {
-  console.log('Function shutdown:', ev.detail?.reason || 'unknown reason');
 });
 
 // Rule-based intent classification
@@ -495,26 +547,24 @@ async function executeWithLovableAI(
   let selectedModel = MODEL_REGISTRY.general_chat;
   let specializedSystemPrompt = systemPrompt;
 
-  // Keep responses short to reduce latency and avoid WhatsApp length limits
-  const brevity =
-    "\n\nImportant: Respond concisely (prefer <1200 characters) unless the user explicitly asks for more.";
+  const brevity = "\n\nImportant: Respond concisely (prefer <1200 characters) unless asked for more.";
 
   switch (intent) {
     case 'web_search':
       selectedModel = MODEL_REGISTRY.web_search;
-      specializedSystemPrompt = `${systemPrompt}${brevity}\n\nProvide current, factual information. Be concise and helpful.`;
+      specializedSystemPrompt = `${systemPrompt}${brevity}\n\nProvide current, factual information. Be concise.`;
       break;
     case 'reasoning':
       selectedModel = MODEL_REGISTRY.heavy_reasoning;
-      specializedSystemPrompt = `${systemPrompt}${brevity}\n\nExplain clearly and logically. Avoid unnecessary verbosity.`;
+      specializedSystemPrompt = `${systemPrompt}${brevity}\n\nExplain clearly and logically.`;
       break;
     case 'planning':
       selectedModel = MODEL_REGISTRY.planning;
-      specializedSystemPrompt = `${systemPrompt}${brevity}\n\nCreate a short, structured plan with clear steps.`;
+      specializedSystemPrompt = `${systemPrompt}${brevity}\n\nCreate a short, structured plan.`;
       break;
     default:
       selectedModel = MODEL_REGISTRY.general_chat;
-      specializedSystemPrompt = `${systemPrompt}${brevity}\n\nBe friendly, concise, and helpful.`;
+      specializedSystemPrompt = `${systemPrompt}${brevity}\n\nBe friendly and helpful.`;
       break;
   }
 
@@ -553,14 +603,12 @@ async function executeWithLovableAI(
     }
   };
 
-  const startedAt = Date.now();
-
   try {
     let response = await makeRequest(selectedModel, maxTokens);
 
-    // One fast retry on transient overloads
+    // Retry on transient errors
     if (!response.ok && (response.status === 429 || response.status === 503 || response.status === 504)) {
-      console.warn(`Lovable AI transient error (${response.status}). Retrying with fallback model.`);
+      console.warn(`Transient error (${response.status}), retrying with fallback`);
       await new Promise((r) => setTimeout(r, 400));
       selectedModel = MODEL_REGISTRY.fallback;
       response = await makeRequest(selectedModel, 400);
@@ -582,14 +630,6 @@ async function executeWithLovableAI(
     const data = await response.json();
     const text = data?.choices?.[0]?.message?.content;
 
-    const elapsedMs = Date.now() - startedAt;
-    console.log('Lovable AI completed', {
-      elapsedMs,
-      intent,
-      model: selectedModel,
-      chars: typeof text === 'string' ? text.length : 0,
-    });
-
     return {
       response: typeof text === 'string' && text.trim().length
         ? text
@@ -597,8 +637,7 @@ async function executeWithLovableAI(
       model: selectedModel,
     };
   } catch (error) {
-    const elapsedMs = Date.now() - startedAt;
-    console.error('Lovable AI execution error:', { elapsedMs, error: String(error) });
+    console.error('Lovable AI execution error:', String(error));
     return { response: '❌ An error occurred.', model: selectedModel };
   }
 }
