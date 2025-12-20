@@ -1,0 +1,384 @@
+import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { Loader2, Calendar, Clock, Plus, Trash2, Send, Bot, CheckCircle, XCircle, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
+import { format } from "date-fns";
+
+interface ScheduledMessage {
+  id: string;
+  phone_number: string;
+  message_content: string;
+  task_prompt: string | null;
+  scheduled_for: string;
+  status: string;
+  sent_at: string | null;
+  ai_response: string | null;
+  model_used: string | null;
+  created_at: string;
+}
+
+interface Subscription {
+  phone_number: string;
+  active: boolean;
+}
+
+export const ScheduledMessagesView = () => {
+  const [messages, setMessages] = useState<ScheduledMessage[]>([]);
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  
+  // Form state
+  const [showForm, setShowForm] = useState(false);
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [messageType, setMessageType] = useState<'direct' | 'ai_task'>('direct');
+  const [messageContent, setMessageContent] = useState('');
+  const [taskPrompt, setTaskPrompt] = useState('');
+  const [scheduledDate, setScheduledDate] = useState('');
+  const [scheduledTime, setScheduledTime] = useState('');
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    setLoading(true);
+    
+    const [messagesRes, subsRes] = await Promise.all([
+      supabase
+        .from('scheduled_messages')
+        .select('*')
+        .order('scheduled_for', { ascending: true }),
+      supabase
+        .from('subscriptions')
+        .select('phone_number, active')
+        .eq('active', true)
+    ]);
+    
+    if (messagesRes.error) {
+      console.error('Error loading scheduled messages:', messagesRes.error);
+      toast.error('Failed to load scheduled messages');
+    } else {
+      setMessages(messagesRes.data || []);
+    }
+    
+    if (subsRes.data) {
+      setSubscriptions(subsRes.data);
+    }
+    
+    setLoading(false);
+  };
+
+  const handleCreate = async () => {
+    if (!phoneNumber || !scheduledDate || !scheduledTime) {
+      toast.error('Please fill in required fields');
+      return;
+    }
+    
+    if (messageType === 'direct' && !messageContent) {
+      toast.error('Please enter a message');
+      return;
+    }
+    
+    if (messageType === 'ai_task' && !taskPrompt) {
+      toast.error('Please enter an AI task prompt');
+      return;
+    }
+    
+    setCreating(true);
+    
+    const scheduledFor = new Date(`${scheduledDate}T${scheduledTime}`).toISOString();
+    
+    const { error } = await supabase.from('scheduled_messages').insert({
+      phone_number: phoneNumber,
+      message_content: messageType === 'direct' ? messageContent : `[AI Task] ${taskPrompt}`,
+      task_prompt: messageType === 'ai_task' ? taskPrompt : null,
+      scheduled_for: scheduledFor,
+      status: 'pending'
+    });
+    
+    if (error) {
+      console.error('Error creating scheduled message:', error);
+      toast.error('Failed to schedule message');
+    } else {
+      toast.success('Message scheduled successfully');
+      setShowForm(false);
+      resetForm();
+      loadData();
+    }
+    
+    setCreating(false);
+  };
+
+  const resetForm = () => {
+    setPhoneNumber('');
+    setMessageType('direct');
+    setMessageContent('');
+    setTaskPrompt('');
+    setScheduledDate('');
+    setScheduledTime('');
+  };
+
+  const handleDelete = async (id: string) => {
+    const { error } = await supabase
+      .from('scheduled_messages')
+      .delete()
+      .eq('id', id);
+    
+    if (error) {
+      toast.error('Failed to delete message');
+    } else {
+      toast.success('Message deleted');
+      setMessages(prev => prev.filter(m => m.id !== id));
+    }
+  };
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'pending':
+        return <Badge variant="outline" className="bg-yellow-500/10 text-yellow-500 border-yellow-500/20"><Clock className="w-3 h-3 mr-1" />Pending</Badge>;
+      case 'processing':
+        return <Badge variant="outline" className="bg-blue-500/10 text-blue-500 border-blue-500/20"><RefreshCw className="w-3 h-3 mr-1 animate-spin" />Processing</Badge>;
+      case 'sent':
+        return <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/20"><CheckCircle className="w-3 h-3 mr-1" />Sent</Badge>;
+      case 'failed':
+        return <Badge variant="outline" className="bg-red-500/10 text-red-500 border-red-500/20"><XCircle className="w-3 h-3 mr-1" />Failed</Badge>;
+      default:
+        return <Badge variant="outline">{status}</Badge>;
+    }
+  };
+
+  if (loading) {
+    return (
+      <Card className="border-border/50 shadow-md bg-card/50 backdrop-blur-sm">
+        <CardContent className="flex items-center justify-center py-12">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h2 className="text-xl font-semibold">Scheduled Messages</h2>
+        <Button onClick={() => setShowForm(!showForm)} className="bg-gradient-primary">
+          <Plus className="w-4 h-4 mr-2" />
+          Schedule Message
+        </Button>
+      </div>
+
+      {showForm && (
+        <Card className="border-border/50 shadow-md bg-card/50 backdrop-blur-sm">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-primary" />
+              Schedule New Message
+            </CardTitle>
+            <CardDescription>Schedule a direct message or AI-generated response</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Phone Number</Label>
+                {subscriptions.length > 0 ? (
+                  <Select value={phoneNumber} onValueChange={setPhoneNumber}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select subscriber or enter number" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {subscriptions.map(sub => (
+                        <SelectItem key={sub.phone_number} value={sub.phone_number}>
+                          {sub.phone_number}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input
+                    value={phoneNumber}
+                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    placeholder="+1234567890"
+                  />
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label>Message Type</Label>
+                <Select value={messageType} onValueChange={(v) => setMessageType(v as 'direct' | 'ai_task')}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="direct">
+                      <div className="flex items-center gap-2">
+                        <Send className="w-4 h-4" />
+                        Direct Message
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="ai_task">
+                      <div className="flex items-center gap-2">
+                        <Bot className="w-4 h-4" />
+                        AI Task
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Date</Label>
+                <Input
+                  type="date"
+                  value={scheduledDate}
+                  onChange={(e) => setScheduledDate(e.target.value)}
+                  min={new Date().toISOString().split('T')[0]}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Time</Label>
+                <Input
+                  type="time"
+                  value={scheduledTime}
+                  onChange={(e) => setScheduledTime(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {messageType === 'direct' ? (
+              <div className="space-y-2">
+                <Label>Message Content</Label>
+                <Textarea
+                  value={messageContent}
+                  onChange={(e) => setMessageContent(e.target.value)}
+                  placeholder="Enter the message to send..."
+                  className="min-h-[100px]"
+                />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label>AI Task Prompt</Label>
+                <Textarea
+                  value={taskPrompt}
+                  onChange={(e) => setTaskPrompt(e.target.value)}
+                  placeholder="e.g., 'Summarize the latest AI news and send it as a briefing'"
+                  className="min-h-[100px]"
+                />
+                <p className="text-xs text-muted-foreground">
+                  The AI will execute this task at the scheduled time and send the response.
+                </p>
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <Button onClick={handleCreate} disabled={creating} className="bg-gradient-primary">
+                {creating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Calendar className="w-4 h-4 mr-2" />}
+                Schedule
+              </Button>
+              <Button variant="outline" onClick={() => { setShowForm(false); resetForm(); }}>
+                Cancel
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card className="border-border/50 shadow-md bg-card/50 backdrop-blur-sm">
+        <CardHeader>
+          <CardTitle className="text-lg">Scheduled Messages</CardTitle>
+          <CardDescription>{messages.length} scheduled messages</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {messages.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
+              <p>No scheduled messages yet</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {messages.map((msg) => (
+                <div key={msg.id} className="p-4 rounded-lg bg-muted/30 border border-border/50">
+                  <div className="flex justify-between items-start mb-2">
+                    <div className="flex items-center gap-2">
+                      {msg.task_prompt ? (
+                        <Badge variant="secondary" className="bg-primary/10">
+                          <Bot className="w-3 h-3 mr-1" />
+                          AI Task
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary">
+                          <Send className="w-3 h-3 mr-1" />
+                          Direct
+                        </Badge>
+                      )}
+                      {getStatusBadge(msg.status)}
+                    </div>
+                    
+                    {msg.status === 'pending' && (
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive">
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Delete scheduled message?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This will permanently remove this scheduled message.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => handleDelete(msg.id)}>Delete</AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    )}
+                  </div>
+                  
+                  <p className="text-sm font-medium mb-1">{msg.phone_number}</p>
+                  <p className="text-sm text-muted-foreground mb-2">
+                    {msg.task_prompt || msg.message_content}
+                  </p>
+                  
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      {format(new Date(msg.scheduled_for), 'MMM d, yyyy h:mm a')}
+                    </span>
+                    {msg.sent_at && (
+                      <span className="flex items-center gap-1">
+                        <CheckCircle className="w-3 h-3 text-green-500" />
+                        Sent {format(new Date(msg.sent_at), 'h:mm a')}
+                      </span>
+                    )}
+                    {msg.model_used && (
+                      <span className="text-primary">{msg.model_used}</span>
+                    )}
+                  </div>
+                  
+                  {msg.ai_response && msg.status === 'sent' && (
+                    <div className="mt-2 p-2 bg-primary/5 rounded text-sm">
+                      <p className="text-xs font-medium text-primary mb-1">AI Response:</p>
+                      <p className="text-muted-foreground">{msg.ai_response.slice(0, 200)}...</p>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+};

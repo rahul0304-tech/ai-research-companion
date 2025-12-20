@@ -4,7 +4,9 @@ import { MessagesView } from "@/components/dashboard/MessagesView";
 import { UpdatesView } from "@/components/dashboard/UpdatesView";
 import { SubscriptionsView } from "@/components/dashboard/SubscriptionsView";
 import { SettingsView } from "@/components/dashboard/SettingsView";
-import { MessageSquare, Sparkles, Users, Settings, LogOut } from "lucide-react";
+import { ScheduledMessagesView } from "@/components/dashboard/ScheduledMessagesView";
+import { UsageView } from "@/components/dashboard/UsageView";
+import { MessageSquare, Sparkles, Users, Settings, LogOut, Calendar, BarChart3 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
@@ -49,13 +51,20 @@ const Dashboard = () => {
 
       <div className="container mx-auto px-4 py-8">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full max-w-2xl mx-auto grid-cols-4 mb-8 bg-card/50 backdrop-blur-sm p-1 rounded-xl border border-border/50">
+          <TabsList className="grid w-full max-w-3xl mx-auto grid-cols-6 mb-8 bg-card/50 backdrop-blur-sm p-1 rounded-xl border border-border/50">
             <TabsTrigger 
               value="messages" 
               className="flex items-center gap-2 data-[state=active]:bg-gradient-primary data-[state=active]:text-white transition-smooth"
             >
               <MessageSquare className="w-4 h-4" />
               <span className="hidden sm:inline">Messages</span>
+            </TabsTrigger>
+            <TabsTrigger 
+              value="scheduled"
+              className="flex items-center gap-2 data-[state=active]:bg-gradient-primary data-[state=active]:text-white transition-smooth"
+            >
+              <Calendar className="w-4 h-4" />
+              <span className="hidden sm:inline">Scheduled</span>
             </TabsTrigger>
             <TabsTrigger 
               value="updates"
@@ -72,6 +81,13 @@ const Dashboard = () => {
               <span className="hidden sm:inline">Subscribers</span>
             </TabsTrigger>
             <TabsTrigger 
+              value="usage"
+              className="flex items-center gap-2 data-[state=active]:bg-gradient-primary data-[state=active]:text-white transition-smooth"
+            >
+              <BarChart3 className="w-4 h-4" />
+              <span className="hidden sm:inline">Usage</span>
+            </TabsTrigger>
+            <TabsTrigger 
               value="settings"
               className="flex items-center gap-2 data-[state=active]:bg-gradient-primary data-[state=active]:text-white transition-smooth"
             >
@@ -84,12 +100,20 @@ const Dashboard = () => {
             <MessagesView />
           </TabsContent>
 
+          <TabsContent value="scheduled" className="space-y-4">
+            <ScheduledMessagesView />
+          </TabsContent>
+
           <TabsContent value="updates" className="space-y-4">
             <UpdatesView />
           </TabsContent>
 
           <TabsContent value="subscriptions" className="space-y-4">
             <SubscriptionsView />
+          </TabsContent>
+
+          <TabsContent value="usage" className="space-y-4">
+            <UsageView />
           </TabsContent>
 
           <TabsContent value="settings" className="space-y-4">

@@ -6,7 +6,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Settings, Save, Copy, CheckCircle, Key, Bot } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Loader2, Settings, Save, Copy, CheckCircle, Key, Bot, Shield } from "lucide-react";
 import { toast } from "sonner";
 
 interface Setting {
@@ -79,6 +80,13 @@ export const SettingsView = () => {
   const [aiModel, setAiModel] = useState('google/gemini-2.5-flash-lite');
   const [apiKey, setApiKey] = useState('');
   const [apiKeySet, setApiKeySet] = useState(false);
+  
+  // Fallback provider settings
+  const [fallbackEnabled, setFallbackEnabled] = useState(false);
+  const [fallbackProvider, setFallbackProvider] = useState<AIProvider>('lovable');
+  const [fallbackModel, setFallbackModel] = useState('google/gemini-2.5-flash-lite');
+  const [fallbackApiKey, setFallbackApiKey] = useState('');
+  const [fallbackApiKeySet, setFallbackApiKeySet] = useState(false);
 
   const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/whatsapp-webhook`;
 
@@ -128,6 +136,12 @@ export const SettingsView = () => {
         if (val.provider) setAiProvider(val.provider as AIProvider);
         if (val.model) setAiModel(val.model as string);
         if (val.api_key_set) setApiKeySet(val.api_key_set as boolean);
+        
+        // Load fallback settings
+        if (val.fallback_enabled) setFallbackEnabled(val.fallback_enabled as boolean);
+        if (val.fallback_provider) setFallbackProvider(val.fallback_provider as AIProvider);
+        if (val.fallback_model) setFallbackModel(val.fallback_model as string);
+        if (val.fallback_api_key_set) setFallbackApiKeySet(val.fallback_api_key_set as boolean);
       }
     }
     setLoading(false);
@@ -158,17 +172,27 @@ export const SettingsView = () => {
           description: 'Meta WhatsApp Phone Number ID'
         }, { onConflict: 'setting_key' });
 
-      // Save AI provider settings
+      // Save AI provider settings with fallback
       const providerConfig: any = {
         provider: aiProvider,
         model: aiModel,
-        api_key_set: apiKeySet || (apiKey.length > 0)
+        api_key_set: apiKeySet || (apiKey.length > 0),
+        fallback_enabled: fallbackEnabled,
+        fallback_provider: fallbackProvider,
+        fallback_model: fallbackModel,
+        fallback_api_key_set: fallbackApiKeySet || (fallbackApiKey.length > 0)
       };
       
       // Only include API key if it's being set/updated
       if (apiKey.length > 0) {
         providerConfig.api_key = apiKey;
         providerConfig.api_key_set = true;
+      }
+      
+      // Include fallback API key if set
+      if (fallbackApiKey.length > 0) {
+        providerConfig.fallback_api_key = fallbackApiKey;
+        providerConfig.fallback_api_key_set = true;
       }
 
       await supabase
@@ -180,8 +204,13 @@ export const SettingsView = () => {
         }, { onConflict: 'setting_key' });
 
       if (apiKey.length > 0) {
-        setApiKey(''); // Clear the input after saving
+        setApiKey('');
         setApiKeySet(true);
+      }
+      
+      if (fallbackApiKey.length > 0) {
+        setFallbackApiKey('');
+        setFallbackApiKeySet(true);
       }
 
       toast.success('Settings saved successfully');
@@ -208,7 +237,18 @@ export const SettingsView = () => {
     setApiKeySet(false);
   };
 
+  const handleFallbackProviderChange = (provider: AIProvider) => {
+    setFallbackProvider(provider);
+    const providerConfig = AI_PROVIDERS.find(p => p.id === provider);
+    if (providerConfig && providerConfig.models.length > 0) {
+      setFallbackModel(providerConfig.models[0]);
+    }
+    setFallbackApiKey('');
+    setFallbackApiKeySet(false);
+  };
+
   const currentProvider = AI_PROVIDERS.find(p => p.id === aiProvider);
+  const currentFallbackProvider = AI_PROVIDERS.find(p => p.id === fallbackProvider);
 
   if (loading) {
     return (
@@ -296,6 +336,80 @@ export const SettingsView = () => {
               Lovable AI is free and requires no API key. It provides access to Google Gemini and OpenAI models.
             </div>
           )}
+          
+          {/* Fallback Provider Section */}
+          <div className="border-t border-border/50 pt-4 mt-4">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Shield className="w-5 h-5 text-muted-foreground" />
+                <div>
+                  <Label className="text-base">Fallback Provider</Label>
+                  <p className="text-xs text-muted-foreground">Automatically use backup if primary fails</p>
+                </div>
+              </div>
+              <Switch
+                checked={fallbackEnabled}
+                onCheckedChange={setFallbackEnabled}
+              />
+            </div>
+            
+            {fallbackEnabled && (
+              <div className="space-y-4 pl-7">
+                <div className="space-y-2">
+                  <Label>Fallback Provider</Label>
+                  <Select value={fallbackProvider} onValueChange={(v) => handleFallbackProviderChange(v as AIProvider)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {AI_PROVIDERS.filter(p => p.id !== aiProvider).map(provider => (
+                        <SelectItem key={provider.id} value={provider.id}>
+                          {provider.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Fallback Model</Label>
+                  <Select value={fallbackModel} onValueChange={setFallbackModel}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {currentFallbackProvider?.models.map(model => (
+                        <SelectItem key={model} value={model}>
+                          {model}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {currentFallbackProvider?.requiresKey && (
+                  <div className="space-y-2">
+                    <Label htmlFor="fallback-api-key" className="flex items-center gap-2">
+                      <Key className="w-4 h-4" />
+                      Fallback API Key
+                      {fallbackApiKeySet && (
+                        <span className="text-xs text-green-500 flex items-center gap-1">
+                          <CheckCircle className="w-3 h-3" /> Configured
+                        </span>
+                      )}
+                    </Label>
+                    <Input
+                      id="fallback-api-key"
+                      type="password"
+                      value={fallbackApiKey}
+                      onChange={(e) => setFallbackApiKey(e.target.value)}
+                      placeholder={fallbackApiKeySet ? '••••••••••••••••' : `Enter your ${currentFallbackProvider.name} API key`}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
 
