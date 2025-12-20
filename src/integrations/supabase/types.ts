@@ -56,6 +56,45 @@ export type Database = {
         }
         Relationships: []
       }
+      ai_usage: {
+        Row: {
+          created_at: string
+          date: string
+          estimated_cost_usd: number | null
+          id: string
+          input_tokens: number | null
+          model: string
+          output_tokens: number | null
+          provider: string
+          request_count: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          date?: string
+          estimated_cost_usd?: number | null
+          id?: string
+          input_tokens?: number | null
+          model: string
+          output_tokens?: number | null
+          provider: string
+          request_count?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          date?: string
+          estimated_cost_usd?: number | null
+          id?: string
+          input_tokens?: number | null
+          model?: string
+          output_tokens?: number | null
+          provider?: string
+          request_count?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       assistant_settings: {
         Row: {
           created_at: string
@@ -79,6 +118,48 @@ export type Database = {
           id?: string
           setting_key?: string
           setting_value?: Json
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      scheduled_messages: {
+        Row: {
+          ai_response: string | null
+          created_at: string
+          id: string
+          message_content: string
+          model_used: string | null
+          phone_number: string
+          scheduled_for: string
+          sent_at: string | null
+          status: string
+          task_prompt: string | null
+          updated_at: string
+        }
+        Insert: {
+          ai_response?: string | null
+          created_at?: string
+          id?: string
+          message_content: string
+          model_used?: string | null
+          phone_number: string
+          scheduled_for: string
+          sent_at?: string | null
+          status?: string
+          task_prompt?: string | null
+          updated_at?: string
+        }
+        Update: {
+          ai_response?: string | null
+          created_at?: string
+          id?: string
+          message_content?: string
+          model_used?: string | null
+          phone_number?: string
+          scheduled_for?: string
+          sent_at?: string | null
+          status?: string
+          task_prompt?: string | null
           updated_at?: string
         }
         Relationships: []
