@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Loader2, Calendar, Clock, Plus, Trash2, Send, Bot, CheckCircle, XCircle, RefreshCw } from "lucide-react";
+import { Loader2, Calendar, Clock, Plus, Trash2, Send, Bot, CheckCircle, XCircle, RefreshCw, Repeat } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 
@@ -17,12 +17,17 @@ interface ScheduledMessage {
   phone_number: string;
   message_content: string;
   task_prompt: string | null;
+  prompt_instructions: string | null;
   scheduled_for: string;
   status: string;
   sent_at: string | null;
   ai_response: string | null;
   model_used: string | null;
   created_at: string;
+  recurrence_type: string;
+  recurrence_interval: number | null;
+  recurrence_end_date: string | null;
+  next_run_at: string | null;
 }
 
 interface Subscription {
@@ -30,24 +35,60 @@ interface Subscription {
   active: boolean;
 }
 
+type RecurrenceType = 'once' | 'daily' | 'weekly' | 'every_x_hours' | 'every_x_days' | 'date_range';
+
 export const ScheduledMessagesView = () => {
   const [messages, setMessages] = useState<ScheduledMessage[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [triggering, setTriggering] = useState(false);
   
   // Form state
   const [showForm, setShowForm] = useState(false);
-  const [triggering, setTriggering] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [messageType, setMessageType] = useState<'direct' | 'ai_task'>('direct');
   const [messageContent, setMessageContent] = useState('');
   const [taskPrompt, setTaskPrompt] = useState('');
+  const [promptInstructions, setPromptInstructions] = useState('');
   const [scheduledDate, setScheduledDate] = useState('');
   const [scheduledTime, setScheduledTime] = useState('');
+  const [recurrenceType, setRecurrenceType] = useState<RecurrenceType>('once');
+  const [recurrenceInterval, setRecurrenceInterval] = useState('1');
+  const [recurrenceEndDate, setRecurrenceEndDate] = useState('');
 
   useEffect(() => {
     loadData();
+    
+    // Set up real-time subscription
+    const channel = supabase
+      .channel('scheduled-messages-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'scheduled_messages'
+        },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setMessages(prev => [...prev, payload.new as ScheduledMessage].sort(
+              (a, b) => new Date(a.scheduled_for).getTime() - new Date(b.scheduled_for).getTime()
+            ));
+          } else if (payload.eventType === 'UPDATE') {
+            setMessages(prev => prev.map(msg => 
+              msg.id === payload.new.id ? payload.new as ScheduledMessage : msg
+            ));
+          } else if (payload.eventType === 'DELETE') {
+            setMessages(prev => prev.filter(msg => msg.id !== payload.old.id));
+          }
+        }
+      )
+      .subscribe();
+    
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const loadData = async () => {
@@ -94,17 +135,29 @@ export const ScheduledMessagesView = () => {
       return;
     }
     
+    if ((recurrenceType === 'every_x_hours' || recurrenceType === 'every_x_days') && !recurrenceInterval) {
+      toast.error('Please enter a recurrence interval');
+      return;
+    }
+    
     setCreating(true);
     
     const scheduledFor = new Date(`${scheduledDate}T${scheduledTime}`).toISOString();
     
-    const { error } = await supabase.from('scheduled_messages').insert({
+    const insertData: Record<string, unknown> = {
       phone_number: phoneNumber,
       message_content: messageType === 'direct' ? messageContent : `[AI Task] ${taskPrompt}`,
       task_prompt: messageType === 'ai_task' ? taskPrompt : null,
+      prompt_instructions: messageType === 'ai_task' ? promptInstructions || null : null,
       scheduled_for: scheduledFor,
-      status: 'pending'
-    });
+      status: 'pending',
+      recurrence_type: recurrenceType,
+      recurrence_interval: ['every_x_hours', 'every_x_days'].includes(recurrenceType) ? parseInt(recurrenceInterval) : null,
+      recurrence_end_date: recurrenceType === 'date_range' && recurrenceEndDate ? new Date(recurrenceEndDate).toISOString() : null,
+      next_run_at: scheduledFor
+    };
+    
+    const { error } = await supabase.from('scheduled_messages').insert([insertData as any]);
     
     if (error) {
       console.error('Error creating scheduled message:', error);
@@ -113,7 +166,6 @@ export const ScheduledMessagesView = () => {
       toast.success('Message scheduled successfully');
       setShowForm(false);
       resetForm();
-      loadData();
     }
     
     setCreating(false);
@@ -124,8 +176,12 @@ export const ScheduledMessagesView = () => {
     setMessageType('direct');
     setMessageContent('');
     setTaskPrompt('');
+    setPromptInstructions('');
     setScheduledDate('');
     setScheduledTime('');
+    setRecurrenceType('once');
+    setRecurrenceInterval('1');
+    setRecurrenceEndDate('');
   };
 
   const handleDelete = async (id: string) => {
@@ -138,7 +194,6 @@ export const ScheduledMessagesView = () => {
       toast.error('Failed to delete message');
     } else {
       toast.success('Message deleted');
-      setMessages(prev => prev.filter(m => m.id !== id));
     }
   };
 
@@ -159,7 +214,6 @@ export const ScheduledMessagesView = () => {
       if (response.ok) {
         const result = await response.json();
         toast.success(`Processed ${result.processed || 0} message(s)`);
-        loadData();
       } else {
         toast.error('Failed to trigger scheduled messages');
       }
@@ -182,6 +236,25 @@ export const ScheduledMessagesView = () => {
         return <Badge variant="outline" className="bg-red-500/10 text-red-500 border-red-500/20"><XCircle className="w-3 h-3 mr-1" />Failed</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
+    }
+  };
+
+  const getRecurrenceBadge = (type: string, interval: number | null) => {
+    switch (type) {
+      case 'once':
+        return null;
+      case 'daily':
+        return <Badge variant="secondary" className="text-xs"><Repeat className="w-3 h-3 mr-1" />Daily</Badge>;
+      case 'weekly':
+        return <Badge variant="secondary" className="text-xs"><Repeat className="w-3 h-3 mr-1" />Weekly</Badge>;
+      case 'every_x_hours':
+        return <Badge variant="secondary" className="text-xs"><Repeat className="w-3 h-3 mr-1" />Every {interval}h</Badge>;
+      case 'every_x_days':
+        return <Badge variant="secondary" className="text-xs"><Repeat className="w-3 h-3 mr-1" />Every {interval}d</Badge>;
+      case 'date_range':
+        return <Badge variant="secondary" className="text-xs"><Repeat className="w-3 h-3 mr-1" />Date Range</Badge>;
+      default:
+        return null;
     }
   };
 
@@ -226,7 +299,7 @@ export const ScheduledMessagesView = () => {
               <Calendar className="w-5 h-5 text-primary" />
               Schedule New Message
             </CardTitle>
-            <CardDescription>Schedule a direct message or AI-generated response</CardDescription>
+            <CardDescription>Schedule a direct message or AI-generated response with recurrence options</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -278,7 +351,7 @@ export const ScheduledMessagesView = () => {
               </div>
 
               <div className="space-y-2">
-                <Label>Date</Label>
+                <Label>Start Date</Label>
                 <Input
                   type="date"
                   value={scheduledDate}
@@ -295,6 +368,48 @@ export const ScheduledMessagesView = () => {
                   onChange={(e) => setScheduledTime(e.target.value)}
                 />
               </div>
+
+              <div className="space-y-2">
+                <Label>Recurrence</Label>
+                <Select value={recurrenceType} onValueChange={(v) => setRecurrenceType(v as RecurrenceType)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="once">Once</SelectItem>
+                    <SelectItem value="daily">Every Day</SelectItem>
+                    <SelectItem value="weekly">Every Week</SelectItem>
+                    <SelectItem value="every_x_hours">Every X Hours</SelectItem>
+                    <SelectItem value="every_x_days">Every X Days</SelectItem>
+                    <SelectItem value="date_range">Date Range (Daily)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {(recurrenceType === 'every_x_hours' || recurrenceType === 'every_x_days') && (
+                <div className="space-y-2">
+                  <Label>Interval ({recurrenceType === 'every_x_hours' ? 'hours' : 'days'})</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={recurrenceInterval}
+                    onChange={(e) => setRecurrenceInterval(e.target.value)}
+                    placeholder={recurrenceType === 'every_x_hours' ? 'e.g., 6' : 'e.g., 3'}
+                  />
+                </div>
+              )}
+
+              {recurrenceType === 'date_range' && (
+                <div className="space-y-2">
+                  <Label>End Date</Label>
+                  <Input
+                    type="date"
+                    value={recurrenceEndDate}
+                    onChange={(e) => setRecurrenceEndDate(e.target.value)}
+                    min={scheduledDate || new Date().toISOString().split('T')[0]}
+                  />
+                </div>
+              )}
             </div>
 
             {messageType === 'direct' ? (
@@ -308,17 +423,32 @@ export const ScheduledMessagesView = () => {
                 />
               </div>
             ) : (
-              <div className="space-y-2">
-                <Label>AI Task Prompt</Label>
-                <Textarea
-                  value={taskPrompt}
-                  onChange={(e) => setTaskPrompt(e.target.value)}
-                  placeholder="e.g., 'Summarize the latest AI news and send it as a briefing'"
-                  className="min-h-[100px]"
-                />
-                <p className="text-xs text-muted-foreground">
-                  The AI will execute this task at the scheduled time and send the response.
-                </p>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>AI Task Prompt</Label>
+                  <Textarea
+                    value={taskPrompt}
+                    onChange={(e) => setTaskPrompt(e.target.value)}
+                    placeholder="e.g., 'Summarize the latest AI news and send it as a briefing'"
+                    className="min-h-[80px]"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    The AI will execute this task freshly at each scheduled time.
+                  </p>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label>Prompt Instructions (Optional)</Label>
+                  <Textarea
+                    value={promptInstructions}
+                    onChange={(e) => setPromptInstructions(e.target.value)}
+                    placeholder="e.g., 'Keep responses under 200 words. Use bullet points. Include sources.'"
+                    className="min-h-[80px]"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Additional instructions to guide how the AI should format or approach the task.
+                  </p>
+                </div>
               </div>
             )}
 
@@ -338,7 +468,7 @@ export const ScheduledMessagesView = () => {
       <Card className="border-border/50 shadow-md bg-card/50 backdrop-blur-sm">
         <CardHeader>
           <CardTitle className="text-lg">Scheduled Messages</CardTitle>
-          <CardDescription>{messages.length} scheduled messages</CardDescription>
+          <CardDescription>{messages.length} scheduled messages • Real-time updates enabled</CardDescription>
         </CardHeader>
         <CardContent>
           {messages.length === 0 ? (
@@ -351,7 +481,7 @@ export const ScheduledMessagesView = () => {
               {messages.map((msg) => (
                 <div key={msg.id} className="p-4 rounded-lg bg-muted/30 border border-border/50">
                   <div className="flex justify-between items-start mb-2">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       {msg.task_prompt ? (
                         <Badge variant="secondary" className="bg-primary/10">
                           <Bot className="w-3 h-3 mr-1" />
@@ -364,6 +494,7 @@ export const ScheduledMessagesView = () => {
                         </Badge>
                       )}
                       {getStatusBadge(msg.status)}
+                      {getRecurrenceBadge(msg.recurrence_type, msg.recurrence_interval)}
                     </div>
                     
                     {msg.status === 'pending' && (
@@ -394,11 +525,23 @@ export const ScheduledMessagesView = () => {
                     {msg.task_prompt || msg.message_content}
                   </p>
                   
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                  {msg.prompt_instructions && (
+                    <p className="text-xs text-muted-foreground mb-2 italic">
+                      Instructions: {msg.prompt_instructions}
+                    </p>
+                  )}
+                  
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
                     <span className="flex items-center gap-1">
                       <Clock className="w-3 h-3" />
                       {format(new Date(msg.scheduled_for), 'MMM d, yyyy h:mm a')}
                     </span>
+                    {msg.next_run_at && msg.recurrence_type !== 'once' && msg.status === 'pending' && (
+                      <span className="flex items-center gap-1 text-primary">
+                        <RefreshCw className="w-3 h-3" />
+                        Next: {format(new Date(msg.next_run_at), 'MMM d, h:mm a')}
+                      </span>
+                    )}
                     {msg.sent_at && (
                       <span className="flex items-center gap-1">
                         <CheckCircle className="w-3 h-3 text-green-500" />

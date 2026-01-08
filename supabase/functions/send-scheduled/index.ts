@@ -229,12 +229,13 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseKey);
     
     // Get pending scheduled messages that are due
-    const now = new Date().toISOString();
+    const now = new Date();
+    const nowIso = now.toISOString();
     const { data: pendingMessages, error: fetchError } = await supabase
       .from('scheduled_messages')
       .select('*')
       .eq('status', 'pending')
-      .lte('scheduled_for', now);
+      .lte('next_run_at', nowIso);
     
     if (fetchError) {
       console.error('Error fetching scheduled messages:', fetchError);
@@ -288,10 +289,14 @@ serve(async (req) => {
         let messageToSend = msg.message_content;
         let modelUsed = 'direct';
         
-        // If it's an AI task, execute it
+        // If it's an AI task, execute it fresh
         if (msg.task_prompt) {
+          const promptInstructions = msg.prompt_instructions 
+            ? `\n\nAdditional instructions: ${msg.prompt_instructions}` 
+            : '';
+          
           const messages = [
-            { role: 'system', content: systemPrompt + '\n\nExecute the following task and provide a response:' },
+            { role: 'system', content: systemPrompt + promptInstructions + '\n\nExecute the following task and provide a response:' },
             { role: 'user', content: msg.task_prompt }
           ];
           
@@ -315,14 +320,54 @@ serve(async (req) => {
           throw new Error(sendResult.error.message || 'Failed to send message');
         }
         
-        // Update as sent
+        // Calculate next run time for recurring messages
+        const recurrenceType = msg.recurrence_type || 'once';
+        let nextRunAt: string | null = null;
+        let newStatus = 'sent';
+        
+        if (recurrenceType !== 'once') {
+          const currentRun = new Date(msg.next_run_at || msg.scheduled_for);
+          let nextRun: Date | null = null;
+          
+          switch (recurrenceType) {
+            case 'daily':
+            case 'date_range':
+              nextRun = new Date(currentRun.getTime() + 24 * 60 * 60 * 1000);
+              break;
+            case 'weekly':
+              nextRun = new Date(currentRun.getTime() + 7 * 24 * 60 * 60 * 1000);
+              break;
+            case 'every_x_hours':
+              nextRun = new Date(currentRun.getTime() + (msg.recurrence_interval || 1) * 60 * 60 * 1000);
+              break;
+            case 'every_x_days':
+              nextRun = new Date(currentRun.getTime() + (msg.recurrence_interval || 1) * 24 * 60 * 60 * 1000);
+              break;
+          }
+          
+          // Check if we should continue recurring
+          if (nextRun) {
+            if (recurrenceType === 'date_range' && msg.recurrence_end_date) {
+              if (nextRun <= new Date(msg.recurrence_end_date)) {
+                nextRunAt = nextRun.toISOString();
+                newStatus = 'pending';
+              }
+            } else {
+              nextRunAt = nextRun.toISOString();
+              newStatus = 'pending';
+            }
+          }
+        }
+        
+        // Update message status
         await supabase
           .from('scheduled_messages')
           .update({
-            status: 'sent',
+            status: newStatus,
             sent_at: new Date().toISOString(),
             ai_response: msg.task_prompt ? messageToSend : null,
-            model_used: modelUsed
+            model_used: modelUsed,
+            next_run_at: nextRunAt
           })
           .eq('id', msg.id);
         

@@ -129,7 +129,12 @@ export type Database = {
           id: string
           message_content: string
           model_used: string | null
+          next_run_at: string | null
           phone_number: string
+          prompt_instructions: string | null
+          recurrence_end_date: string | null
+          recurrence_interval: number | null
+          recurrence_type: string
           scheduled_for: string
           sent_at: string | null
           status: string
@@ -142,7 +147,12 @@ export type Database = {
           id?: string
           message_content: string
           model_used?: string | null
+          next_run_at?: string | null
           phone_number: string
+          prompt_instructions?: string | null
+          recurrence_end_date?: string | null
+          recurrence_interval?: number | null
+          recurrence_type?: string
           scheduled_for: string
           sent_at?: string | null
           status?: string
@@ -155,7 +165,12 @@ export type Database = {
           id?: string
           message_content?: string
           model_used?: string | null
+          next_run_at?: string | null
           phone_number?: string
+          prompt_instructions?: string | null
+          recurrence_end_date?: string | null
+          recurrence_interval?: number | null
+          recurrence_type?: string
           scheduled_for?: string
           sent_at?: string | null
           status?: string
