@@ -38,6 +38,7 @@ export const ScheduledMessagesView = () => {
   
   // Form state
   const [showForm, setShowForm] = useState(false);
+  const [triggering, setTriggering] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [messageType, setMessageType] = useState<'direct' | 'ai_task'>('direct');
   const [messageContent, setMessageContent] = useState('');
@@ -141,6 +142,34 @@ export const ScheduledMessagesView = () => {
     }
   };
 
+  const handleManualTrigger = async () => {
+    setTriggering(true);
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-scheduled`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`
+          }
+        }
+      );
+      
+      if (response.ok) {
+        const result = await response.json();
+        toast.success(`Processed ${result.processed || 0} message(s)`);
+        loadData();
+      } else {
+        toast.error('Failed to trigger scheduled messages');
+      }
+    } catch (error) {
+      console.error('Error triggering:', error);
+      toast.error('Failed to trigger scheduled messages');
+    }
+    setTriggering(false);
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'pending':
@@ -170,10 +199,24 @@ export const ScheduledMessagesView = () => {
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-semibold">Scheduled Messages</h2>
-        <Button onClick={() => setShowForm(!showForm)} className="bg-gradient-primary">
-          <Plus className="w-4 h-4 mr-2" />
-          Schedule Message
-        </Button>
+        <div className="flex gap-2">
+          <Button 
+            variant="outline" 
+            onClick={handleManualTrigger} 
+            disabled={triggering}
+          >
+            {triggering ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4 mr-2" />
+            )}
+            Process Now
+          </Button>
+          <Button onClick={() => setShowForm(!showForm)} className="bg-gradient-primary">
+            <Plus className="w-4 h-4 mr-2" />
+            Schedule Message
+          </Button>
+        </div>
       </div>
 
       {showForm && (
