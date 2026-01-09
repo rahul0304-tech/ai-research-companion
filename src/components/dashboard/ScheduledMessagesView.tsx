@@ -304,27 +304,15 @@ export const ScheduledMessagesView = () => {
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Phone Number</Label>
-                {subscriptions.length > 0 ? (
-                  <Select value={phoneNumber} onValueChange={setPhoneNumber}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select subscriber or enter number" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {subscriptions.map(sub => (
-                        <SelectItem key={sub.phone_number} value={sub.phone_number}>
-                          {sub.phone_number}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <Input
-                    value={phoneNumber}
-                    onChange={(e) => setPhoneNumber(e.target.value)}
-                    placeholder="+1234567890"
-                  />
-                )}
+                <Label>Phone Number (with country code)</Label>
+                <Input
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value)}
+                  placeholder="e.g., 916303175715 or 14155552671"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Include country code without + sign (e.g., 91 for India, 1 for USA)
+                </p>
               </div>
 
               <div className="space-y-2">
