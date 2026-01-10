@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Loader2, Calendar, Clock, Plus, Trash2, Send, Bot, CheckCircle, XCircle, RefreshCw, Repeat } from "lucide-react";
+import { Loader2, Calendar, Clock, Plus, Trash2, Send, Bot, CheckCircle, XCircle, RefreshCw, Repeat, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 
@@ -46,6 +46,7 @@ export const ScheduledMessagesView = () => {
   
   // Form state
   const [showForm, setShowForm] = useState(false);
+  const [editingMessage, setEditingMessage] = useState<ScheduledMessage | null>(null);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [messageType, setMessageType] = useState<'direct' | 'ai_task'>('direct');
   const [messageContent, setMessageContent] = useState('');
@@ -172,6 +173,7 @@ export const ScheduledMessagesView = () => {
   };
 
   const resetForm = () => {
+    setEditingMessage(null);
     setPhoneNumber('');
     setMessageType('direct');
     setMessageContent('');
@@ -184,13 +186,75 @@ export const ScheduledMessagesView = () => {
     setRecurrenceEndDate('');
   };
 
+  const handleEdit = (msg: ScheduledMessage) => {
+    setEditingMessage(msg);
+    setPhoneNumber(msg.phone_number);
+    setMessageType(msg.task_prompt ? 'ai_task' : 'direct');
+    setMessageContent(msg.task_prompt ? '' : msg.message_content);
+    setTaskPrompt(msg.task_prompt || '');
+    setPromptInstructions(msg.prompt_instructions || '');
+    const scheduledFor = new Date(msg.scheduled_for);
+    setScheduledDate(format(scheduledFor, 'yyyy-MM-dd'));
+    setScheduledTime(format(scheduledFor, 'HH:mm'));
+    setRecurrenceType(msg.recurrence_type as RecurrenceType);
+    setRecurrenceInterval(msg.recurrence_interval?.toString() || '1');
+    setRecurrenceEndDate(msg.recurrence_end_date ? format(new Date(msg.recurrence_end_date), 'yyyy-MM-dd') : '');
+    setShowForm(true);
+  };
+
+  const handleUpdate = async () => {
+    if (!editingMessage) return;
+    
+    if (!phoneNumber || !scheduledDate || !scheduledTime) {
+      toast.error('Please fill in required fields');
+      return;
+    }
+    
+    setCreating(true);
+    
+    const scheduledFor = new Date(`${scheduledDate}T${scheduledTime}`).toISOString();
+    
+    const updateData: Record<string, unknown> = {
+      phone_number: phoneNumber,
+      message_content: messageType === 'direct' ? messageContent : `[AI Task] ${taskPrompt}`,
+      task_prompt: messageType === 'ai_task' ? taskPrompt : null,
+      prompt_instructions: messageType === 'ai_task' ? promptInstructions || null : null,
+      scheduled_for: scheduledFor,
+      recurrence_type: recurrenceType,
+      recurrence_interval: ['every_x_hours', 'every_x_days'].includes(recurrenceType) ? parseInt(recurrenceInterval) : null,
+      recurrence_end_date: recurrenceType === 'date_range' && recurrenceEndDate ? new Date(recurrenceEndDate).toISOString() : null,
+      next_run_at: scheduledFor
+    };
+    
+    const { error } = await supabase
+      .from('scheduled_messages')
+      .update(updateData)
+      .eq('id', editingMessage.id);
+    
+    if (error) {
+      console.error('Error updating scheduled message:', error);
+      toast.error('Failed to update message');
+    } else {
+      toast.success('Message updated successfully');
+      setShowForm(false);
+      resetForm();
+      loadData();
+    }
+    
+    setCreating(false);
+  };
+
   const handleDelete = async (id: string) => {
+    const prev = messages;
+    setMessages((cur) => cur.filter((m) => m.id !== id));
+    
     const { error } = await supabase
       .from('scheduled_messages')
       .delete()
       .eq('id', id);
     
     if (error) {
+      setMessages(prev);
       toast.error('Failed to delete message');
     } else {
       toast.success('Message deleted');
@@ -285,7 +349,7 @@ export const ScheduledMessagesView = () => {
             )}
             Process Now
           </Button>
-          <Button onClick={() => setShowForm(!showForm)} className="bg-gradient-primary">
+          <Button onClick={() => { resetForm(); setShowForm(!showForm); }} className="bg-gradient-primary">
             <Plus className="w-4 h-4 mr-2" />
             Schedule Message
           </Button>
@@ -297,9 +361,11 @@ export const ScheduledMessagesView = () => {
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <Calendar className="w-5 h-5 text-primary" />
-              Schedule New Message
+              {editingMessage ? 'Edit Scheduled Message' : 'Schedule New Message'}
             </CardTitle>
-            <CardDescription>Schedule a direct message or AI-generated response with recurrence options</CardDescription>
+            <CardDescription>
+              {editingMessage ? 'Update the scheduled message details' : 'Schedule a direct message or AI-generated response with recurrence options'}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -441,9 +507,13 @@ export const ScheduledMessagesView = () => {
             )}
 
             <div className="flex gap-2">
-              <Button onClick={handleCreate} disabled={creating} className="bg-gradient-primary">
+              <Button 
+                onClick={editingMessage ? handleUpdate : handleCreate} 
+                disabled={creating} 
+                className="bg-gradient-primary"
+              >
                 {creating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Calendar className="w-4 h-4 mr-2" />}
-                Schedule
+                {editingMessage ? 'Update' : 'Schedule'}
               </Button>
               <Button variant="outline" onClick={() => { setShowForm(false); resetForm(); }}>
                 Cancel
@@ -485,10 +555,18 @@ export const ScheduledMessagesView = () => {
                       {getRecurrenceBadge(msg.recurrence_type, msg.recurrence_interval)}
                     </div>
                     
-                    {msg.status === 'pending' && (
+                    <div className="flex items-center gap-1">
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-8 w-8"
+                        onClick={() => handleEdit(msg)}
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </Button>
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
-                          <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive">
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive">
                             <Trash2 className="w-4 h-4" />
                           </Button>
                         </AlertDialogTrigger>
@@ -501,11 +579,16 @@ export const ScheduledMessagesView = () => {
                           </AlertDialogHeader>
                           <AlertDialogFooter>
                             <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => handleDelete(msg.id)}>Delete</AlertDialogAction>
+                            <AlertDialogAction 
+                              onClick={() => handleDelete(msg.id)}
+                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            >
+                              Delete
+                            </AlertDialogAction>
                           </AlertDialogFooter>
                         </AlertDialogContent>
                       </AlertDialog>
-                    )}
+                    </div>
                   </div>
                   
                   <p className="text-sm font-medium mb-1">{msg.phone_number}</p>
