@@ -157,6 +157,10 @@ export const UpdatesView = () => {
   };
 
   const handleDelete = async (id: string) => {
+    // Optimistic UI update (in case realtime isn't enabled)
+    const prev = updates;
+    setUpdates((cur) => cur.filter((u) => u.id !== id));
+
     const { error } = await supabase
       .from('ai_updates')
       .delete()
@@ -164,10 +168,15 @@ export const UpdatesView = () => {
 
     if (error) {
       console.error('Error deleting:', error);
+      // Revert optimistic update on failure
+      setUpdates(prev);
       toast.error('Failed to delete update');
-    } else {
-      toast.success('Update deleted');
+      return;
     }
+
+    toast.success('Update deleted');
+    // Ensure list reflects server state even if realtime isn't firing
+    void loadUpdates();
   };
 
   if (loading) {
