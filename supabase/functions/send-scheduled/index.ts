@@ -219,6 +219,18 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Authenticate cron job requests using CRON_SECRET
+  const cronSecret = Deno.env.get('CRON_SECRET');
+  const authHeader = req.headers.get('Authorization');
+
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+    console.error('Unauthorized request - invalid or missing CRON_SECRET');
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  }
+
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
