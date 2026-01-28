@@ -292,11 +292,11 @@ export const MessagesView = () => {
                 <div className="flex gap-3 flex-row-reverse">
                   <Avatar className="w-8 h-8">
                     <AvatarFallback className="bg-gradient-primary">
-                      <Bot className="w-4 h-4 text-white" />
+                      <Bot className="w-4 h-4 text-black" />
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex-1 items-end flex flex-col gap-1">
-                    <div className="px-4 py-3 rounded-xl bg-gradient-primary text-white">
+                    <div className="px-4 py-3 rounded-xl bg-gradient-primary text-black">
                       <div className="flex items-center gap-2">
                         <Loader2 className="w-4 h-4 animate-spin" />
                         <span className="text-sm">AI is thinking...</span>
@@ -315,7 +315,7 @@ export const MessagesView = () => {
                 >
                   <Avatar className="w-8 h-8">
                     <AvatarFallback className={message.sender === 'user' ? 'bg-secondary' : 'bg-gradient-primary'}>
-                      {message.sender === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4 text-white" />}
+                      {message.sender === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4 text-black" />}
                     </AvatarFallback>
                   </Avatar>
                   
@@ -356,7 +356,7 @@ export const MessagesView = () => {
                       className={`px-4 py-2 rounded-xl max-w-[80%] ${
                         message.sender === 'user'
                           ? 'bg-muted'
-                          : 'bg-gradient-primary text-white'
+                          : 'bg-gradient-primary text-black'
                       }`}
                     >
                       <p className="text-sm whitespace-pre-wrap">
