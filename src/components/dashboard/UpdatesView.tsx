@@ -203,7 +203,7 @@ export const UpdatesView = () => {
             </div>
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
               <DialogTrigger asChild>
-                <Button onClick={handleOpenCreate} className="bg-gradient-primary text-white shadow-glow transition-smooth hover:shadow-lg">
+                <Button onClick={handleOpenCreate} className="bg-gradient-primary text-black shadow-glow transition-smooth hover:shadow-lg">
                   <Plus className="w-4 h-4 mr-2" />
                   New Update
                 </Button>
