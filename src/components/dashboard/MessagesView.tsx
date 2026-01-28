@@ -43,34 +43,61 @@ export const MessagesView = () => {
   useEffect(() => {
     loadMessages();
     
-    // Subscribe to realtime updates
+    // Subscribe to realtime updates with incremental handling
     const channel = supabase
       .channel('messages-changes')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'whatsapp_messages' },
+        { event: 'INSERT', schema: 'public', table: 'whatsapp_messages' },
         (payload) => {
-          // Track processing messages for "thinking" indicator
-          if (payload.eventType === 'INSERT' && payload.new) {
-            const newMsg = payload.new as Message;
-            if (newMsg.processing_status === 'processing') {
-              setProcessingMessages(prev => new Set(prev).add(newMsg.phone_number));
-            }
+          const newMsg = payload.new as Message;
+          // Add new message to the top of the list
+          setMessages(prev => {
+            // Avoid duplicates
+            if (prev.some(m => m.id === newMsg.id)) return prev;
+            return [newMsg, ...prev];
+          });
+          // Track processing status
+          if (newMsg.processing_status === 'processing') {
+            setProcessingMessages(prev => new Set(prev).add(newMsg.phone_number));
           }
-          if (payload.eventType === 'UPDATE' && payload.new) {
-            const updatedMsg = payload.new as Message;
-            if (updatedMsg.processing_status === 'completed' || updatedMsg.processing_status === 'sent') {
-              setProcessingMessages(prev => {
-                const next = new Set(prev);
-                next.delete(updatedMsg.phone_number);
-                return next;
-              });
-            }
-          }
-          loadMessages();
         }
       )
-      .subscribe();
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'whatsapp_messages' },
+        (payload) => {
+          const updatedMsg = payload.new as Message;
+          // Update the message in place
+          setMessages(prev => prev.map(m => 
+            m.id === updatedMsg.id ? updatedMsg : m
+          ));
+          // Update processing status
+          if (updatedMsg.processing_status === 'completed' || updatedMsg.processing_status === 'sent') {
+            setProcessingMessages(prev => {
+              const next = new Set(prev);
+              next.delete(updatedMsg.phone_number);
+              return next;
+            });
+          } else if (updatedMsg.processing_status === 'processing') {
+            setProcessingMessages(prev => new Set(prev).add(updatedMsg.phone_number));
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'whatsapp_messages' },
+        (payload) => {
+          const deletedMsg = payload.old as { id: string };
+          // Remove the message from the list
+          setMessages(prev => prev.filter(m => m.id !== deletedMsg.id));
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('Realtime subscription active for messages');
+        }
+      });
 
     return () => {
       supabase.removeChannel(channel);
