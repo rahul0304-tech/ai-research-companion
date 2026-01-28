@@ -21,7 +21,7 @@ const Index = () => {
             </div>
             
             <h1 className="text-5xl md:text-7xl font-bold text-foreground animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100">
-              Meet <span className="gradient-primary bg-clip-text text-transparent">InfoNiblet</span>
+              Meet <span className="bg-gradient-to-r from-[hsl(192,85%,40%)] to-[hsl(192,85%,60%)] bg-clip-text text-transparent drop-shadow-sm">InfoNiblet</span>
             </h1>
             
             <p className="text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto animate-in fade-in slide-in-from-bottom-5 duration-700 delay-200">
@@ -30,7 +30,7 @@ const Index = () => {
             
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center animate-in fade-in slide-in-from-bottom-6 duration-700 delay-300">
               <Link to="/dashboard">
-                <Button size="lg" className="bg-gradient-primary text-black shadow-glow transition-smooth hover:text-white hover:shadow-lg px-8 py-6 text-lg font-semibold">
+                <Button size="lg" className="bg-gradient-primary text-black shadow-glow transition-smooth hover:shadow-lg px-8 py-6 text-lg font-semibold">
                   Open Dashboard
                   <ArrowRight className="ml-2 w-5 h-5" />
                 </Button>
@@ -86,7 +86,7 @@ const Index = () => {
           <Card className="border-border/50 shadow-md bg-card/50 backdrop-blur-sm transition-smooth hover:shadow-lg hover:-translate-y-1">
             <CardHeader>
               <div className="w-12 h-12 rounded-xl bg-gradient-primary flex items-center justify-center shadow-glow mb-4">
-                <Zap className="w-6 h-6 text-white" />
+                <Zap className="w-6 h-6 text-black" />
               </div>
               <CardTitle className="text-xl">Smart Retrieval</CardTitle>
               <CardDescription>
@@ -98,7 +98,7 @@ const Index = () => {
           <Card className="border-border/50 shadow-md bg-card/50 backdrop-blur-sm transition-smooth hover:shadow-lg hover:-translate-y-1">
             <CardHeader>
               <div className="w-12 h-12 rounded-xl bg-gradient-accent flex items-center justify-center shadow-glow mb-4">
-                <Bot className="w-6 h-6 text-white" />
+                <Bot className="w-6 h-6 text-black" />
               </div>
               <CardTitle className="text-xl">AI-Powered</CardTitle>
               <CardDescription>
@@ -110,7 +110,7 @@ const Index = () => {
           <Card className="border-border/50 shadow-md bg-card/50 backdrop-blur-sm transition-smooth hover:shadow-lg hover:-translate-y-1">
             <CardHeader>
               <div className="w-12 h-12 rounded-xl bg-gradient-primary flex items-center justify-center shadow-glow mb-4">
-                <Sparkles className="w-6 h-6 text-white" />
+                <Sparkles className="w-6 h-6 text-black" />
               </div>
               <CardTitle className="text-xl">Image Generation</CardTitle>
               <CardDescription>
@@ -122,7 +122,7 @@ const Index = () => {
           <Card className="border-border/50 shadow-md bg-card/50 backdrop-blur-sm transition-smooth hover:shadow-lg hover:-translate-y-1">
             <CardHeader>
               <div className="w-12 h-12 rounded-xl bg-gradient-accent flex items-center justify-center shadow-glow mb-4">
-                <MessageSquare className="w-6 h-6 text-white" />
+                <MessageSquare className="w-6 h-6 text-black" />
               </div>
               <CardTitle className="text-xl">Conversational</CardTitle>
               <CardDescription>
@@ -135,7 +135,7 @@ const Index = () => {
 
       {/* CTA Section */}
       <section className="container mx-auto px-4 py-20">
-        <Card className="border-border/50 shadow-lg bg-gradient-primary text-white max-w-4xl mx-auto">
+        <Card className="border-border/50 shadow-lg bg-gradient-primary text-black max-w-4xl mx-auto">
           <CardContent className="p-12 text-center space-y-6">
             <h2 className="text-3xl md:text-4xl font-bold">
               Ready to Transform Your Research?
