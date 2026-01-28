@@ -136,7 +136,7 @@ export const SubscriptionsView = () => {
               onChange={(e) => setNewPhone(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleAddSubscription()}
             />
-            <Button onClick={handleAddSubscription} className="bg-gradient-primary text-white shadow-glow">
+            <Button onClick={handleAddSubscription} className="bg-gradient-primary text-black shadow-glow">
               <Plus className="w-4 h-4 mr-2" />
               Add
             </Button>
