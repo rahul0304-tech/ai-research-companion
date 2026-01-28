@@ -54,42 +54,42 @@ const Dashboard = () => {
           <TabsList className="grid w-full max-w-3xl mx-auto grid-cols-6 mb-8 bg-card/50 backdrop-blur-sm p-1 rounded-xl border border-border/50">
             <TabsTrigger 
               value="messages" 
-              className="flex items-center gap-2 data-[state=active]:bg-gradient-primary data-[state=active]:text-white transition-smooth"
+              className="flex items-center gap-2 data-[state=active]:bg-gradient-primary data-[state=active]:text-black transition-smooth"
             >
               <MessageSquare className="w-4 h-4" />
               <span className="hidden sm:inline">Messages</span>
             </TabsTrigger>
             <TabsTrigger 
               value="scheduled"
-              className="flex items-center gap-2 data-[state=active]:bg-gradient-primary data-[state=active]:text-white transition-smooth"
+              className="flex items-center gap-2 data-[state=active]:bg-gradient-primary data-[state=active]:text-black transition-smooth"
             >
               <Calendar className="w-4 h-4" />
               <span className="hidden sm:inline">Scheduled</span>
             </TabsTrigger>
             <TabsTrigger 
               value="updates"
-              className="flex items-center gap-2 data-[state=active]:bg-gradient-primary data-[state=active]:text-white transition-smooth"
+              className="flex items-center gap-2 data-[state=active]:bg-gradient-primary data-[state=active]:text-black transition-smooth"
             >
               <Sparkles className="w-4 h-4" />
               <span className="hidden sm:inline">Updates</span>
             </TabsTrigger>
             <TabsTrigger 
               value="subscriptions"
-              className="flex items-center gap-2 data-[state=active]:bg-gradient-primary data-[state=active]:text-white transition-smooth"
+              className="flex items-center gap-2 data-[state=active]:bg-gradient-primary data-[state=active]:text-black transition-smooth"
             >
               <Users className="w-4 h-4" />
               <span className="hidden sm:inline">Subscribers</span>
             </TabsTrigger>
             <TabsTrigger 
               value="usage"
-              className="flex items-center gap-2 data-[state=active]:bg-gradient-primary data-[state=active]:text-white transition-smooth"
+              className="flex items-center gap-2 data-[state=active]:bg-gradient-primary data-[state=active]:text-black transition-smooth"
             >
               <BarChart3 className="w-4 h-4" />
               <span className="hidden sm:inline">Usage</span>
             </TabsTrigger>
             <TabsTrigger 
               value="settings"
-              className="flex items-center gap-2 data-[state=active]:bg-gradient-primary data-[state=active]:text-white transition-smooth"
+              className="flex items-center gap-2 data-[state=active]:bg-gradient-primary data-[state=active]:text-black transition-smooth"
             >
               <Settings className="w-4 h-4" />
               <span className="hidden sm:inline">Settings</span>
