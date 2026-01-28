@@ -219,12 +219,36 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Authenticate cron job requests using CRON_SECRET
+  // Authenticate: Allow CRON_SECRET (Cron Job) OR Admin User (Manual Trigger)
   const cronSecret = Deno.env.get('CRON_SECRET');
   const authHeader = req.headers.get('Authorization');
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  
+  let isAuthenticated = false;
 
-  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
-    console.error('Unauthorized request - invalid or missing CRON_SECRET');
+  // 1. Check CRON_SECRET
+  if (cronSecret && authHeader === `Bearer ${cronSecret}`) {
+    isAuthenticated = true;
+  } 
+  // 2. Check Admin JWT
+  else if (authHeader) {
+    const token = authHeader.replace('Bearer ', '');
+    const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+    
+    if (!authError && user) {
+      // Check if user is admin
+      const { data: hasRole } = await supabaseAdmin.rpc('has_role', { 
+        _user_id: user.id, 
+        _role: 'admin' 
+      });
+      if (hasRole) isAuthenticated = true;
+    }
+  }
+
+  if (!isAuthenticated) {
+    console.error('Unauthorized request - invalid credentials');
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
       status: 401,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -232,8 +256,6 @@ serve(async (req) => {
   }
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const lovableApiKey = Deno.env.get('LOVABLE_API_KEY')!;
     const whatsappAccessToken = Deno.env.get('WHATSAPP_ACCESS_TOKEN')!;
     const whatsappPhoneNumberId = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID')!;
