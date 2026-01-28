@@ -459,7 +459,7 @@ export const SettingsView = () => {
 
           <Button 
             onClick={handleSaveSettings} 
-            className="w-full bg-gradient-primary text-white shadow-glow transition-smooth hover:shadow-lg"
+            className="w-full bg-gradient-primary text-black shadow-glow transition-smooth hover:shadow-lg"
           >
             <Save className="w-4 h-4 mr-2" />
             Save Settings
