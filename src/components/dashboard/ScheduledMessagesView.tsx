@@ -264,23 +264,13 @@ export const ScheduledMessagesView = () => {
   const handleManualTrigger = async () => {
     setTriggering(true);
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-scheduled`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`
-          }
-        }
-      );
+      const { data, error } = await supabase.functions.invoke('send-scheduled', {
+        method: 'POST',
+      });
       
-      if (response.ok) {
-        const result = await response.json();
-        toast.success(`Processed ${result.processed || 0} message(s)`);
-      } else {
-        toast.error('Failed to trigger scheduled messages');
-      }
+      if (error) throw error;
+      
+      toast.success(`Processed ${data.processed || 0} message(s)`);
     } catch (error) {
       console.error('Error triggering:', error);
       toast.error('Failed to trigger scheduled messages');
@@ -349,7 +339,7 @@ export const ScheduledMessagesView = () => {
             )}
             Process Now
           </Button>
-          <Button onClick={() => { resetForm(); setShowForm(!showForm); }} className="bg-gradient-primary">
+          <Button onClick={() => { resetForm(); setShowForm(!showForm); }} className="bg-gradient-primary text-black">
             <Plus className="w-4 h-4 mr-2" />
             Schedule Message
           </Button>
@@ -510,7 +500,7 @@ export const ScheduledMessagesView = () => {
               <Button 
                 onClick={editingMessage ? handleUpdate : handleCreate} 
                 disabled={creating} 
-                className="bg-gradient-primary"
+                className="bg-gradient-primary text-black"
               >
                 {creating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Calendar className="w-4 h-4 mr-2" />}
                 {editingMessage ? 'Update' : 'Schedule'}
