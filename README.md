@@ -1,73 +1,89 @@
-# Welcome to your Lovable project
+# AI Research Companion
 
-## Project info
+**AI Research Companion** is a modern, AI-powered research and communication platform that combines real-time messaging, multi-LLM intelligence, and scalable cloud infrastructure.
 
-**URL**: https://lovable.dev/projects/39d4ccf0-eeb0-40fa-8d99-a7dd4d547d07
+🚀 **Live Deployment:** https://infoniblet.vercel.app/
 
-## How can I edit this code?
+---
 
-There are several ways of editing your application.
+## 🌐 Demo
 
-**Use Lovable**
+👉 **Production App:** https://infoniblet.vercel.app/
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/39d4ccf0-eeb0-40fa-8d99-a7dd4d547d07) and start prompting.
+---
 
-Changes made via Lovable will be committed automatically to this repo.
+## 🧠 Project Overview
 
-**Use your preferred IDE**
+AI Research Companion is designed to act as an intelligent research assistant with **real-time messaging capabilities**, **WhatsApp integration**, and **multi-LLM support**.  
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+The platform enables users to interact with AI models through a clean web interface while also receiving and streaming WhatsApp message updates via Meta Webhooks.
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+---
 
-Follow these steps:
+## ✨ Key Features
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+### 🔹 AI & LLM Capabilities
+- Multi-provider LLM integration:
+  - **OpenAI**
+  - **Anthropic**
+  - **Google Gemini**
+  - **Lovable**
+- Provider-agnostic architecture for easy switching or fallback
+- Centralized prompt handling and response orchestration
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+### 🔹 WhatsApp & Meta Integration
+- **Meta App Development** for WhatsApp Cloud API
+- **WhatsApp Webhook backend**
+- Real-time streaming of WhatsApp messages into the application
+- Secure webhook verification and event handling
+- Bidirectional communication support (incoming & outgoing messages)
 
-# Step 3: Install the necessary dependencies.
-npm i
+### 🔹 Application Features
+- Responsive, modern UI
+- Real-time updates
+- Scalable backend architecture
+- Ready for enterprise-grade AI workflows
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
+---
 
-**Edit a file directly in GitHub**
+## 🛠️ Tech Stack
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+### Frontend
+- **React**
+- **TypeScript**
+- **Vite**
+- **Tailwind CSS**
 
-**Use GitHub Codespaces**
+### Backend & Infrastructure
+- **Supabase** (Auth, Database, Edge Functions)
+- **Meta WhatsApp Cloud API**
+- **Webhook-based event processing**
+- **Serverless architecture**
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+### AI / LLM Providers
+- **OpenAI**
+- **Anthropic**
+- **Google Gemini**
+- **Lovable**
 
-## What technologies are used for this project?
+### Deployment
+- **Vercel**
 
-This project is built with:
+---
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+## 📦 Getting Started
 
-## How can I deploy this project?
+### Prerequisites
+- Node.js (>= 16)
+- npm or Yarn
+- Supabase account
+- Meta Developer Account (for WhatsApp Cloud API)
 
-Simply open [Lovable](https://lovable.dev/projects/39d4ccf0-eeb0-40fa-8d99-a7dd4d547d07) and click on Share -> Publish.
+---
 
-## Can I connect a custom domain to my Lovable project?
+## 🚀 Installation
 
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+### Clone Repository
+```bash
+git clone https://github.com/rahul0304-tech/ai-research-companion.git
+cd ai-research-companion
